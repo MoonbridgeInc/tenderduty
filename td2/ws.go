@@ -92,13 +92,50 @@ func (cc *ChainConfig) WsRun() {
 		break
 	}
 
-	//#nosec G402 -- configurable option
-	cc.wsclient, err = NewClient(cc.client.Remote(), td.TLSSkipVerify)
-	if err != nil {
-		l(slog.LevelError, err)
-		cancel()
+	// Collect candidate websocket URLs, prioritising healthy nodes, then falling back to down nodes.
+	var wsUrls []string
+	seen := make(map[string]bool)
+	for _, node := range cc.Nodes {
+		if !node.down && !seen[node.Url] {
+			wsUrls = append(wsUrls, node.Url)
+			seen[node.Url] = true
+		}
+	}
+	// Include the active RPC client's URL in case it is a cosmos.directory fallback not listed in Nodes.
+	if cc.client != nil {
+		if remote := cc.client.Remote(); !seen[remote] {
+			wsUrls = append(wsUrls, remote)
+			seen[remote] = true
+		}
+	}
+	// Last resort: try nodes that are currently marked as down.
+	for _, node := range cc.Nodes {
+		if node.down && !seen[node.Url] {
+			wsUrls = append(wsUrls, node.Url)
+			seen[node.Url] = true
+		}
+	}
+
+	// Try each candidate URL until a websocket connection succeeds.
+	var wsURL string
+	for _, u := range wsUrls {
+		//#nosec G402 -- configurable option
+		client, connErr := NewClient(u, td.TLSSkipVerify)
+		if connErr != nil {
+			l(slog.LevelWarn, cc.ChainId, fmt.Sprintf("websocket connection failed for %s: %s", u, connErr))
+			continue
+		}
+		cc.wsclient = client
+		wsURL = u
+		break
+	}
+
+	if cc.wsclient == nil {
+		l(slog.LevelError, cc.ChainId, "all websocket endpoints failed")
+		cc.noWsNodes = true
 		return
 	}
+	cc.noWsNodes = false
 	defer cc.wsclient.Close()
 	err = cc.wsclient.SetCompressionLevel(3)
 	if err != nil {
@@ -290,7 +327,7 @@ func (cc *ChainConfig) WsRun() {
 			break
 		}
 	}
-	l(fmt.Sprintf("⚙️ %-12s watching for NewBlock and Vote events via %s", cc.ChainId, cc.client.Remote()))
+	l(fmt.Sprintf("⚙️ %-12s watching for NewBlock and Vote events via %s", cc.ChainId, wsURL))
 	for {
 		select {
 		case <-cc.client.Quit():

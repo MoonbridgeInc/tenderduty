@@ -656,7 +656,7 @@ func evaluateNoRPCEndpointsAlert(cc *ChainConfig, noNodesSec *int) (bool, bool) 
 	alert, resolved := false, false
 
 	alertID := fmt.Sprintf("NoRPCEndpoints_%s", cc.ValAddress)
-	if cc.noNodes {
+	if cc.noNodes || cc.noWsNodes {
 		*noNodesSec += 2
 		if *noNodesSec <= 60*td.NodeDownMin {
 			if *noNodesSec%20 == 0 {
@@ -1141,7 +1141,7 @@ func (cc *ChainConfig) watch() {
 	for {
 		if cc.valInfo == nil || cc.valInfo.Moniker == "not connected" {
 			time.Sleep(time.Second)
-			if boolVal(cc.Alerts.AlertIfNoServers) && cc.noNodes && noNodesSec >= 60*td.NodeDownMin {
+			if boolVal(cc.Alerts.AlertIfNoServers) && (cc.noNodes || cc.noWsNodes) && noNodesSec >= 60*td.NodeDownMin {
 				alertID := fmt.Sprintf("NoRPCEndpoints_%s", cc.ValAddress)
 				if !alarms.exist(cc.name, alertID) {
 					td.alert(

@@ -176,6 +176,7 @@ type ChainConfig struct {
 	wsclient            *TmConn                   // custom websocket client to work around wss:// bugs in tendermint
 	client              *rpchttp.HTTP             // legit tendermint client
 	noNodes             bool                      // tracks if all nodes are down
+	noWsNodes           bool                      // tracks if all websocket endpoints are down
 	valInfo             *ValInfo                  // recent validator state, only refreshed every few minutes
 	lastValInfo         *ValInfo                  // use for detecting newly-jailed/tombstone
 	totalBondedTokens   float64                   // total bonded tokens on the chain
