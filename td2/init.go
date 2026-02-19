@@ -53,7 +53,7 @@ func init() {
 			if len(parts) == 0 {
 				continue
 			}
-			msgStr := strings.TrimRight(strings.TrimLeft(fmt.Sprint(parts...), "["), "]")
+			msgStr := strings.TrimSpace(fmt.Sprintln(parts...))
 			slog.Log(context.Background(), level, "tenderduty | "+msgStr)
 			if td.EnableDash && !td.HideLogs && td.logChan != nil {
 				td.logChan <- dash.LogMessage{
