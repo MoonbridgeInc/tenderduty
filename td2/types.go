@@ -176,6 +176,7 @@ type ChainConfig struct {
 	wsclient            *TmConn                   // custom websocket client to work around wss:// bugs in tendermint
 	client              *rpchttp.HTTP             // legit tendermint client
 	noNodes             bool                      // tracks if all nodes are down
+	noWsNodes           bool                      // tracks if all websocket endpoints are down
 	valInfo             *ValInfo                  // recent validator state, only refreshed every few minutes
 	lastValInfo         *ValInfo                  // use for detecting newly-jailed/tombstone
 	totalBondedTokens   float64                   // total bonded tokens on the chain
@@ -331,7 +332,7 @@ type NodeConfig struct {
 // PDConfig is the information required to send alerts to PagerDuty
 type PDConfig struct {
 	Enabled           *bool  `yaml:"enabled"`
-	ApiKey            string `yaml:"api_key"`
+	ApiKey            string `yaml:"api_key" json:"-"`
 	DefaultSeverity   string `yaml:"default_severity"`
 	SeverityThreshold string `yaml:"severity_threshold"`
 }
@@ -347,7 +348,7 @@ type DiscordConfig struct {
 // TeleConfig holds the information needed to publish to a Telegram webhook for sending alerts
 type TeleConfig struct {
 	Enabled           *bool    `yaml:"enabled"`
-	ApiKey            string   `yaml:"api_key"`
+	ApiKey            string   `yaml:"api_key" json:"-"`
 	Channel           string   `yaml:"channel"`
 	Mentions          []string `yaml:"mentions"`
 	SeverityThreshold string   `yaml:"severity_threshold"`

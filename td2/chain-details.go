@@ -426,7 +426,7 @@ func (cc *ChainConfig) getBankMetadataFromCosmosDirectory(denom string) *bank.Me
 		// Denom exponents are typically small (0-18), but we check the full range for safety
 		exponent := uint32(0)
 		if unit.Exponent >= 0 && unit.Exponent <= 255 {
-			exponent = uint32(unit.Exponent)
+			exponent = uint32(unit.Exponent) //#nosec G115 -- bounds-checked above (0-255 fits in uint32)
 		}
 		denomUnits[i] = &bank.DenomUnit{
 			Denom:    unit.Denom,

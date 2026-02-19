@@ -55,7 +55,7 @@ func getVotingPeriodProposals(httpClient *http.Client, indexers []string) ([]gov
 			continue // Try next node
 		}
 
-		resp, err := httpClient.Do(req)
+		resp, err := httpClient.Do(req) //#nosec G704 -- URL is from operator-supplied config
 		if err != nil {
 			lastErr = err
 			continue // Try next node
@@ -133,7 +133,7 @@ func (d *NamadaProvider) QueryUnvotedOpenProposals(ctx context.Context) ([]gov.P
 				continue // Try next node
 			}
 
-			resp, err := httpClient.Do(req)
+			resp, err := httpClient.Do(req) //#nosec G704 -- URL is from operator-supplied config
 			if err != nil {
 				continue // Try next node
 			}
@@ -338,7 +338,7 @@ func (d *NamadaProvider) QueryValidatorSelfDelegationRewardsAndCommission(ctx co
 				continue // Try next node
 			}
 
-			resp, err := httpClient.Do(req)
+			resp, err := httpClient.Do(req) //#nosec G704 -- URL is from operator-supplied config
 			if err != nil {
 				lastErr = err
 				continue // Try next node
@@ -397,7 +397,7 @@ func (d *NamadaProvider) QueryValidatorVotingPool(ctx context.Context) (votingPo
 				continue // Try next node
 			}
 
-			resp, err := httpClient.Do(req)
+			resp, err := httpClient.Do(req) //#nosec G704 -- URL is from operator-supplied config
 			if err != nil {
 				lastErr = err
 				continue // Try next node

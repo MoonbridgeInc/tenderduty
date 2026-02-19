@@ -246,7 +246,7 @@ func notifySlack(msg *alertMsg) (err error) {
 	}
 
 	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //#nosec G704 -- URL is from operator-supplied config
 	if err != nil {
 		return
 	}
@@ -312,7 +312,7 @@ func notifyDiscord(msg *alertMsg) (err error) {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //#nosec G704 -- URL is from operator-supplied config
 	if err != nil {
 		l(slog.LevelWarn, "⚠️ Could not notify discord!", err)
 		return err
@@ -320,7 +320,7 @@ func notifyDiscord(msg *alertMsg) (err error) {
 	_ = resp.Body.Close()
 
 	if resp.StatusCode != 204 {
-		slog.Warn("discord webhook returned non-success response", "status", resp.StatusCode)
+		slog.Warn("discord webhook returned non-success response", "status", resp.StatusCode) //#nosec G706 -- resp.StatusCode is an integer, not user-controlled string data
 		l(slog.LevelWarn, "⚠️ Could not notify discord! Returned", resp.StatusCode)
 		return err
 	}
@@ -497,7 +497,7 @@ func notifyWebhook(msg *alertMsg) (err error) {
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //#nosec G704 -- URL is from operator-supplied config
 	if err != nil {
 		l(slog.LevelWarn, "⚠️ Could not send webhook!", err)
 		return err
@@ -656,7 +656,7 @@ func evaluateNoRPCEndpointsAlert(cc *ChainConfig, noNodesSec *int) (bool, bool) 
 	alert, resolved := false, false
 
 	alertID := fmt.Sprintf("NoRPCEndpoints_%s", cc.ValAddress)
-	if cc.noNodes {
+	if cc.noNodes || cc.noWsNodes {
 		*noNodesSec += 2
 		if *noNodesSec <= 60*td.NodeDownMin {
 			if *noNodesSec%20 == 0 {
@@ -1141,7 +1141,7 @@ func (cc *ChainConfig) watch() {
 	for {
 		if cc.valInfo == nil || cc.valInfo.Moniker == "not connected" {
 			time.Sleep(time.Second)
-			if boolVal(cc.Alerts.AlertIfNoServers) && cc.noNodes && noNodesSec >= 60*td.NodeDownMin {
+			if boolVal(cc.Alerts.AlertIfNoServers) && (cc.noNodes || cc.noWsNodes) && noNodesSec >= 60*td.NodeDownMin {
 				alertID := fmt.Sprintf("NoRPCEndpoints_%s", cc.ValAddress)
 				if !alarms.exist(cc.name, alertID) {
 					td.alert(
