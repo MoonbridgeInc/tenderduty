@@ -340,7 +340,7 @@ func getStatusWithEndpoint(ctx context.Context, u string) (string, bool, error) 
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: td.TLSSkipVerify},
 	}
 	client := &http.Client{Transport: tr}
-	resp, err := client.Do(req)
+	resp, err := client.Do(req) //#nosec G704 -- URL is from operator-supplied config
 	if err != nil {
 		return "", false, err
 	}

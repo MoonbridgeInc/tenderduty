@@ -227,6 +227,6 @@ func EncryptedConfig(plaintext, ciphertext, pass string, decrypting bool) error 
 	if decrypting {
 		fileType = "decrypted"
 	}
-	slog.Info("wrote file", "bytes", size, "type", fileType, "file", outfile)
+	slog.Info("wrote file", "bytes", size, "type", fileType, "file", outfile) //#nosec G706 -- outfile is a CLI-provided path, not network-controlled input
 	return nil
 }

@@ -332,7 +332,7 @@ type NodeConfig struct {
 // PDConfig is the information required to send alerts to PagerDuty
 type PDConfig struct {
 	Enabled           *bool  `yaml:"enabled"`
-	ApiKey            string `yaml:"api_key"`
+	ApiKey            string `yaml:"api_key" json:"-"`
 	DefaultSeverity   string `yaml:"default_severity"`
 	SeverityThreshold string `yaml:"severity_threshold"`
 }
@@ -348,7 +348,7 @@ type DiscordConfig struct {
 // TeleConfig holds the information needed to publish to a Telegram webhook for sending alerts
 type TeleConfig struct {
 	Enabled           *bool    `yaml:"enabled"`
-	ApiKey            string   `yaml:"api_key"`
+	ApiKey            string   `yaml:"api_key" json:"-"`
 	Channel           string   `yaml:"channel"`
 	Mentions          []string `yaml:"mentions"`
 	SeverityThreshold string   `yaml:"severity_threshold"`

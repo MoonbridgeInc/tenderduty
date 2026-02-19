@@ -84,7 +84,7 @@ func (d *DefaultProvider) CheckIfValidatorVoted(ctx context.Context, proposalID 
 			continue // Try next node
 		}
 
-		resp, err := client.Do(req)
+		resp, err := client.Do(req) //#nosec G704 -- URL is from operator-supplied config
 		if err != nil {
 			lastErr = err
 			continue // Try next node

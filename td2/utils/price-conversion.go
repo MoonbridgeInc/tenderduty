@@ -149,7 +149,7 @@ func (c *CoinMarketCapClient) fetchPricesFromAPI(ctx context.Context, slugs []st
 		q.Add("convert", currency)
 		req.URL.RawQuery = q.Encode()
 
-		resp, err := c.httpClient.Do(req)
+		resp, err := c.httpClient.Do(req) //#nosec G704 -- URL is from operator-supplied config
 		if err != nil {
 			// Log the error and continue with next slug
 			fmt.Printf("Error fetching data for slug %s: %v\n", slug, err)
