@@ -59,7 +59,7 @@ func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLog
 			case u := <-updates:
 				// try to catch any accidental rpc endpoint leaks
 				if hideLogs && rex.MatchString(u.LastError) {
-					rex.ReplaceAllString(u.LastError, "-redacted-")
+					u.LastError = rex.ReplaceAllString(u.LastError, "-redacted-")
 				}
 				statusMux.Lock() // probably unnecessary
 				status[u.Name] = u

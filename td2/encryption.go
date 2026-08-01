@@ -176,12 +176,14 @@ func decrypt(encodedFile []byte, password string) (plainText []byte, err error) 
 		return
 	}
 
-	// strip padding
+	// strip padding: encrypt() always appends between 1 and BlockSize() bytes, so a
+	// valid padLen must fall in that range (and can't exceed the plaintext itself).
 	padLen := int(plainText[len(plainText)-1])
-	if (len(plainText)-padLen)%block.BlockSize() != 0 {
-		return plainText[:len(plainText)-padLen], nil
+	if padLen <= 0 || padLen > block.BlockSize() || padLen > len(plainText) {
+		err = errors.New("invalid padding")
+		return
 	}
-	return
+	return plainText[:len(plainText)-padLen], nil
 }
 
 // EncryptedConfig handles conversion of an encrypted or plaintext config to disk

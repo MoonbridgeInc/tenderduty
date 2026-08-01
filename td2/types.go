@@ -250,6 +250,45 @@ func (cc *ChainConfig) mkUpdate(t metricType, v float64, node string) *promUpdat
 	}
 }
 
+// toDashStatus builds a dashboard snapshot for cc to be sent over Config.updateChan.
+// height, lastError, healthyNodes, and activeAlerts vary by call site; everything
+// else is read directly off the current chain/validator state.
+func (cc *ChainConfig) toDashStatus(height int64, lastError string, healthyNodes, activeAlerts int) *dash.ChainStatus {
+	return &dash.ChainStatus{
+		MsgType:                 "status",
+		Name:                    cc.name,
+		ChainId:                 cc.ChainId,
+		Moniker:                 cc.valInfo.Moniker,
+		Bonded:                  cc.valInfo.Bonded,
+		Jailed:                  cc.valInfo.Jailed,
+		Tombstoned:              cc.valInfo.Tombstoned,
+		Missed:                  cc.valInfo.Missed,
+		Window:                  cc.valInfo.Window,
+		MinSignedPerWindow:      cc.minSignedPerWindow,
+		Nodes:                   len(cc.Nodes),
+		HealthyNodes:            healthyNodes,
+		ActiveAlerts:            activeAlerts,
+		Height:                  height,
+		LastError:               lastError,
+		Blocks:                  cc.blocksResults,
+		UnvotedOpenGovProposals: len(cc.unvotedOpenGovProposals),
+		TotalBondedTokens:       cc.totalBondedTokens,
+		TotalSupply:             cc.totalSupply,
+		CommunityTax:            cc.communityTax,
+		InflationRate:           cc.inflationRate,
+		BaseAPR:                 cc.baseAPR,
+		VotingPowerPercent:      cc.valInfo.VotingPowerPercent,
+		DelegatedTokens:         cc.valInfo.DelegatedTokens,
+		CommissionRate:          cc.valInfo.CommissionRate,
+		ValidatorAPR:            cc.valInfo.ValidatorAPR,
+		SelfDelegationRewards:   cc.valInfo.SelfDelegationRewards,
+		Commission:              cc.valInfo.Commission,
+		CryptoPrice:             cc.cryptoPrice,
+		DenomMetadata:           cc.denomMetadata,
+		Projected30DRewards:     cc.valInfo.Projected30DRewards,
+	}
+}
+
 // AlertConfig defines the type of alerts to send for a ChainConfig
 type AlertConfig struct {
 	// How many minutes to wait before alerting that no new blocks have been seen
@@ -434,37 +473,7 @@ func validateConfig(c *Config) (fatal bool, problems []string) {
 		applyAlertDefaults(&v.Alerts, &c.DefaultAlertConfig)
 
 		if td.EnableDash {
-			td.updateChan <- &dash.ChainStatus{
-				MsgType:                 "status",
-				Name:                    v.name,
-				ChainId:                 v.ChainId,
-				Moniker:                 v.valInfo.Moniker,
-				Bonded:                  v.valInfo.Bonded,
-				Jailed:                  v.valInfo.Jailed,
-				Tombstoned:              v.valInfo.Tombstoned,
-				Missed:                  v.valInfo.Missed,
-				MinSignedPerWindow:      v.minSignedPerWindow,
-				Window:                  v.valInfo.Window,
-				Nodes:                   len(v.Nodes),
-				HealthyNodes:            0,
-				ActiveAlerts:            0,
-				Blocks:                  v.blocksResults,
-				UnvotedOpenGovProposals: len(v.unvotedOpenGovProposals),
-				TotalBondedTokens:       v.totalBondedTokens,
-				TotalSupply:             v.totalSupply,
-				CommunityTax:            v.communityTax,
-				InflationRate:           v.inflationRate,
-				BaseAPR:                 v.baseAPR,
-				VotingPowerPercent:      v.valInfo.VotingPowerPercent,
-				DelegatedTokens:         v.valInfo.DelegatedTokens,
-				CommissionRate:          v.valInfo.CommissionRate,
-				ValidatorAPR:            v.valInfo.ValidatorAPR,
-				SelfDelegationRewards:   v.valInfo.SelfDelegationRewards,
-				Commission:              v.valInfo.Commission,
-				CryptoPrice:             v.cryptoPrice,
-				DenomMetadata:           v.denomMetadata,
-				Projected30DRewards:     v.valInfo.Projected30DRewards,
-			}
+			td.updateChan <- v.toDashStatus(0, "", 0, 0)
 		}
 	}
 

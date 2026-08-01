@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	dash "github.com/firstset/tenderduty/v2/td2/dashboard"
 	"github.com/gorilla/websocket"
 	pbtypes "github.com/tendermint/tendermint/proto/tendermint/types"
 )
@@ -226,39 +225,7 @@ func (cc *ChainConfig) WsRun() {
 
 					cc.activeAlerts = alarms.getCount(cc.name)
 					if td.EnableDash {
-						td.updateChan <- &dash.ChainStatus{
-							MsgType:                 "status",
-							Name:                    cc.name,
-							ChainId:                 cc.ChainId,
-							Moniker:                 cc.valInfo.Moniker,
-							Bonded:                  cc.valInfo.Bonded,
-							Jailed:                  cc.valInfo.Jailed,
-							Tombstoned:              cc.valInfo.Tombstoned,
-							Missed:                  cc.valInfo.Missed,
-							Window:                  cc.valInfo.Window,
-							MinSignedPerWindow:      cc.minSignedPerWindow,
-							Nodes:                   len(cc.Nodes),
-							HealthyNodes:            healthyNodes,
-							ActiveAlerts:            cc.activeAlerts,
-							Height:                  update.Height,
-							LastError:               info,
-							Blocks:                  cc.blocksResults,
-							UnvotedOpenGovProposals: len(cc.unvotedOpenGovProposals),
-							TotalBondedTokens:       cc.totalBondedTokens,
-							TotalSupply:             cc.totalSupply,
-							CommunityTax:            cc.communityTax,
-							InflationRate:           cc.inflationRate,
-							BaseAPR:                 cc.baseAPR,
-							VotingPowerPercent:      cc.valInfo.VotingPowerPercent,
-							DelegatedTokens:         cc.valInfo.DelegatedTokens,
-							CommissionRate:          cc.valInfo.CommissionRate,
-							ValidatorAPR:            cc.valInfo.ValidatorAPR,
-							SelfDelegationRewards:   cc.valInfo.SelfDelegationRewards,
-							Commission:              cc.valInfo.Commission,
-							CryptoPrice:             cc.cryptoPrice,
-							DenomMetadata:           cc.denomMetadata,
-							Projected30DRewards:     cc.valInfo.Projected30DRewards,
-						}
+						td.updateChan <- cc.toDashStatus(update.Height, info, healthyNodes, cc.activeAlerts)
 					}
 
 					if td.Prom {
@@ -496,11 +463,6 @@ func NewClient(u string, allowInsecure bool) (*TmConn, error) {
 		endpoint.Scheme = "wss"
 	default:
 		return nil, fmt.Errorf("protocol %s is unknown, valid choices are http, https, tcp, unix, ws, and wss", endpoint.Scheme)
-	}
-
-	// allowInsecure is primarily intended for self-signed certs, but it doesn't make sense to allow yes to for non-tls
-	if endpoint.Scheme == "ws" && !allowInsecure {
-		return nil, errors.New("allowInsecure must be true if protocol is not using TLS")
 	}
 
 	conn := &websocket.Conn{}

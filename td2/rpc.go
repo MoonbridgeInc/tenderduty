@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"time"
 
-	dash "github.com/firstset/tenderduty/v2/td2/dashboard"
 	rpchttp "github.com/tendermint/tendermint/rpc/client/http"
 )
 
@@ -133,39 +132,7 @@ func (cc *ChainConfig) newRpc() error {
 	alarms.clearAll(cc.name)
 	cc.lastError = "no usable RPC endpoints available for " + cc.ChainId
 	if td.EnableDash {
-		td.updateChan <- &dash.ChainStatus{
-			MsgType:                 "status",
-			Name:                    cc.name,
-			ChainId:                 cc.ChainId,
-			Moniker:                 cc.valInfo.Moniker,
-			Bonded:                  cc.valInfo.Bonded,
-			Jailed:                  cc.valInfo.Jailed,
-			Tombstoned:              cc.valInfo.Tombstoned,
-			Missed:                  cc.valInfo.Missed,
-			Window:                  cc.valInfo.Window,
-			MinSignedPerWindow:      cc.minSignedPerWindow,
-			Nodes:                   len(cc.Nodes),
-			HealthyNodes:            0,
-			ActiveAlerts:            1,
-			Height:                  0,
-			LastError:               cc.lastError,
-			Blocks:                  cc.blocksResults,
-			UnvotedOpenGovProposals: len(cc.unvotedOpenGovProposals),
-			TotalBondedTokens:       cc.totalBondedTokens,
-			TotalSupply:             cc.totalSupply,
-			CommunityTax:            cc.communityTax,
-			InflationRate:           cc.inflationRate,
-			BaseAPR:                 cc.baseAPR,
-			VotingPowerPercent:      cc.valInfo.VotingPowerPercent,
-			DelegatedTokens:         cc.valInfo.DelegatedTokens,
-			CommissionRate:          cc.valInfo.CommissionRate,
-			ValidatorAPR:            cc.valInfo.ValidatorAPR,
-			SelfDelegationRewards:   cc.valInfo.SelfDelegationRewards,
-			Commission:              cc.valInfo.Commission,
-			CryptoPrice:             cc.cryptoPrice,
-			DenomMetadata:           cc.denomMetadata,
-			Projected30DRewards:     cc.valInfo.Projected30DRewards,
-		}
+		td.updateChan <- cc.toDashStatus(0, cc.lastError, 0, 1)
 	}
 	return errors.New("no usable endpoints available for " + cc.ChainId)
 }
