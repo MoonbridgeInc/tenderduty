@@ -38,6 +38,10 @@ func Run(configFile, stateFile, chainConfigDirectory string, password *string, d
 		go dg.run(td.ctx)
 	}
 
+	if td.EscalationMinutes > 0 {
+		go escalationSweep(td.ctx, time.Duration(td.EscalationMinutes)*time.Minute)
+	}
+
 	go func() {
 		for {
 			select {

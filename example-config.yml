@@ -15,6 +15,11 @@ node_down_alert_severity: critical
 # seconds into one combined message per destination, instead of one message per alert.
 # 0 (default) sends every alert immediately, unchanged. PagerDuty is never batched.
 digest_interval_seconds: 0
+# Optional: if a severity: critical alert stays active (unresolved) longer than this
+# many minutes, re-send it once more to the same destinations with an escalation
+# message. 0 (default) disables escalation. PagerDuty is excluded — it already has
+# its own native escalation-policy mechanism.
+escalation_minutes: 0
 # whether skip the verification of TLS certificates, when set to `yes` Tenderduty will skip certificate verification and accept self-signed certs
 # NOTE: this flag should be false in a production environment
 tls_skip_verify: no

@@ -54,6 +54,7 @@ chains:
 | `hide_logs`                  | hide_logs is useful if the dashboard will be posted publicly. It disables the log feed, and obscures most node-related details. Be aware this isn't fully vetted for preventing info leaks about node names, etc. |
 | `node_down_alert_minutes`    | How long to wait before alerting that a node is down or has fallen behind (lagging).                                                                                                                              |
 | `digest_interval_seconds`    | Optional. When > 0, batches Discord/Telegram/Slack/webhook alerts firing within this many seconds into one combined message per destination. 0 (default) = immediate, one message per alert. PagerDuty is never batched. |
+| `escalation_minutes`         | Optional. When > 0, re-sends a still-unresolved `severity: critical` alert once more to the same destinations after it has stayed active this many minutes. 0 (default) disables escalation. PagerDuty is excluded — it has its own native escalation-policy mechanism. |
 | `prometheus_enabled`         | Should the prometheus exporter be enabled? See the [prometheus doc](prometheus.md) for information about what endpoints are available.                                                                            |
 | `prometheus_listen_port`     | What port should it listen on? For now only port is configurable                                                                                                                                                  |
 

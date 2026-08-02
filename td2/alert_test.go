@@ -69,6 +69,58 @@ func createTestConfig() *Config {
 	}
 }
 
+// TestAlertDispatchesCorrectMessage is a regression check for the alert()/buildAlertMsg
+// refactor: alert() must still populate every alertMsg field the same way it did
+// before the extraction, and must still record the alarm (now including Severity) in
+// alarms.AllAlarms.
+func TestAlertDispatchesCorrectMessage(t *testing.T) {
+	originalTd, originalAlarms := td, alarms
+	td = createTestConfig()
+	alarms = &alarmCache{
+		AllAlarms: make(map[string]map[string]alertMsgCache),
+		notifyMux: sync.RWMutex{},
+	}
+	defer func() { td, alarms = originalTd, originalAlarms }()
+
+	id := "TestAlert_parity"
+	td.alert("test-chain", "something broke", "critical", false, &id)
+
+	select {
+	case msg := <-td.alertChan:
+		if msg.chain != "test-chain (test-chain-1)" {
+			t.Errorf("expected chain %q, got %q", "test-chain (test-chain-1)", msg.chain)
+		}
+		if msg.uniqueId != id {
+			t.Errorf("expected uniqueId %q, got %q", id, msg.uniqueId)
+		}
+		if msg.message != "something broke" {
+			t.Errorf("expected message %q, got %q", "something broke", msg.message)
+		}
+		if msg.severity != "critical" {
+			t.Errorf("expected severity critical, got %q", msg.severity)
+		}
+		if msg.resolved {
+			t.Error("expected resolved to be false")
+		}
+		if msg.valoperAddress != "testval123" {
+			t.Errorf("expected valoperAddress %q, got %q", "testval123", msg.valoperAddress)
+		}
+	default:
+		t.Fatal("expected a message on td.alertChan")
+	}
+
+	entry, ok := alarms.AllAlarms["test-chain"][id]
+	if !ok {
+		t.Fatal("expected the alarm to be recorded in alarms.AllAlarms")
+	}
+	if entry.Severity != "critical" {
+		t.Errorf("expected recorded Severity 'critical', got %q", entry.Severity)
+	}
+	if entry.Escalated {
+		t.Error("expected a freshly-fired alarm to not be marked Escalated")
+	}
+}
+
 func TestSeverityThresholdToSeverities(t *testing.T) {
 	tests := []struct {
 		name      string

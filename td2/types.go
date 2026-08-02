@@ -140,6 +140,13 @@ type Config struct {
 	// individual incidents, which batching would break.
 	DigestIntervalSeconds int `yaml:"digest_interval_seconds"`
 
+	// EscalationMinutes, when greater than zero, re-sends any still-unresolved
+	// severity="critical" alert once more — to the same Discord/Telegram/Slack/webhook
+	// destinations it originally went to, never PagerDuty (which already has its own
+	// native escalation-policy mechanism tied to the routing key) — if it has remained
+	// active for this many minutes. 0 (the default) disables escalation entirely.
+	EscalationMinutes int `yaml:"escalation_minutes"`
+
 	// whether skip the TLS verification
 	TLSSkipVerify bool `yaml:"tls_skip_verify"`
 

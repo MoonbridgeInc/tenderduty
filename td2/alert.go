@@ -63,8 +63,10 @@ const (
 )
 
 type alertMsgCache struct {
-	Message  string    `json:"message"`
-	SentTime time.Time `json:"sent_time"`
+	Message   string    `json:"message"`
+	SentTime  time.Time `json:"sent_time"`
+	Severity  string    `json:"severity"`
+	Escalated bool      `json:"escalated"`
 }
 
 type alarmCache struct {
@@ -761,21 +763,22 @@ func getAlarms(chain string) string {
 }
 
 // alert creates a universal alert and pushes it to the alertChan to be delivered to appropriate services
-func (c *Config) alert(configName, message, severity string, resolved bool, id *string) {
-	if id == nil {
-		return
-	}
+// buildAlertMsg looks up configName's chain config and constructs the alertMsg for
+// message/severity/resolved/id exactly as (c *Config).alert does, without any
+// dispatch or AllAlarms bookkeeping. Shared by alert() and the escalation sweep
+// (escalation.go). ok is false if configName has no matching chain config.
+func buildAlertMsg(c *Config, configName, message, severity string, resolved bool, id string) (a *alertMsg, cc *ChainConfig, ok bool) {
 	c.chainsMux.RLock()
-	cc := c.Chains[configName]
+	defer c.chainsMux.RUnlock()
+	cc = c.Chains[configName]
 	if cc == nil {
-		c.chainsMux.RUnlock()
-		return
+		return nil, nil, false
 	}
 	valcons := ""
 	if cc.valInfo != nil {
 		valcons = cc.valInfo.Valcons
 	}
-	a := &alertMsg{
+	a = &alertMsg{
 		pd:             boolVal(c.DefaultAlertConfig.Pagerduty.Enabled) && boolVal(cc.Alerts.Pagerduty.Enabled),
 		disc:           boolVal(c.DefaultAlertConfig.Discord.Enabled) && boolVal(cc.Alerts.Discord.Enabled),
 		tg:             boolVal(c.DefaultAlertConfig.Telegram.Enabled) && boolVal(cc.Alerts.Telegram.Enabled),
@@ -788,7 +791,7 @@ func (c *Config) alert(configName, message, severity string, resolved bool, id *
 		valoperAddress: cc.ValAddress,
 		valconsAddress: valcons,
 		message:        message,
-		uniqueId:       *id,
+		uniqueId:       id,
 		key:            cc.Alerts.Pagerduty.ApiKey,
 		tgChannel:      cc.Alerts.Telegram.Channel,
 		tgKey:          cc.Alerts.Telegram.ApiKey,
@@ -799,13 +802,23 @@ func (c *Config) alert(configName, message, severity string, resolved bool, id *
 		whURL:          cc.Alerts.Webhook.URL,
 		alertConfig:    &cc.Alerts,
 	}
+	return a, cc, true
+}
+
+func (c *Config) alert(configName, message, severity string, resolved bool, id *string) {
+	if id == nil {
+		return
+	}
+	a, cc, ok := buildAlertMsg(c, configName, message, severity, resolved, *id)
+	if !ok {
+		return
+	}
 	silenced, _ := cc.silenceStatus()
 	if silenced {
 		l(slog.LevelInfo, configName, "🔇 chain is silenced, suppressing alert dispatch:", message)
 	} else {
 		c.alertChan <- a
 	}
-	c.chainsMux.RUnlock()
 	alarms.notifyMux.Lock()
 	defer alarms.notifyMux.Unlock()
 	if alarms.AllAlarms[configName] == nil {
@@ -826,6 +839,7 @@ func (c *Config) alert(configName, message, severity string, resolved bool, id *
 	cache := alertMsgCache{
 		Message:  message,
 		SentTime: time.Now(),
+		Severity: severity,
 	}
 	alarms.AllAlarms[configName][*id] = cache
 }
