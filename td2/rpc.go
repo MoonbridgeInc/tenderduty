@@ -154,6 +154,13 @@ func (cc *ChainConfig) monitorHealth(ctx context.Context, chainName string) {
 				go func(node *NodeConfig) {
 					alert := func(msg string) {
 						node.lastMsg = fmt.Sprintf("%-12s node %s is %s", chainName, node.Url, msg)
+						// down/catching-up supersedes any prior lagging state, so the two alert
+						// types don't stay open simultaneously for the same underlying outage.
+						if node.lagging {
+							node.lagging = false
+							node.laggingSince = time.Unix(0, 0)
+							node.wasLagging = true
+						}
 						if !node.AlertIfDown {
 							// even if we aren't alerting, we want to display the status in the dashboard.
 							node.down = true
@@ -199,7 +206,28 @@ func (cc *ChainConfig) monitorHealth(ctx context.Context, chainName string) {
 					node.syncing = false
 					node.downSince = time.Unix(0, 0)
 					cc.noNodes = false
-					l(slog.LevelInfo, fmt.Sprintf("🟢 %-12s node %s is healthy", chainName, node.Url))
+
+					// separately check whether the node has stopped advancing even though it
+					// doesn't consider itself to be catching up.
+					secondsBehind := time.Since(status.SyncInfo.LatestBlockTime).Seconds()
+					if td.Prom {
+						td.statsChan <- cc.mkUpdate(metricNodeLagSeconds, secondsBehind, node.Url)
+					}
+					if lagMin := intVal(cc.Alerts.Stalled); lagMin > 0 && secondsBehind > float64(lagMin)*60 {
+						if !node.lagging {
+							node.lagging = true
+							node.laggingSince = time.Now()
+						}
+						node.lastMsg = fmt.Sprintf("%-12s node %s is lagging %.0fs behind the chain head", chainName, node.Url, secondsBehind)
+						l(slog.LevelWarn, "⚠️ "+node.lastMsg)
+					} else {
+						if node.lagging {
+							node.wasLagging = true
+						}
+						node.lagging = false
+						node.laggingSince = time.Unix(0, 0)
+						l(slog.LevelInfo, fmt.Sprintf("🟢 %-12s node %s is healthy", chainName, node.Url))
+					}
 				}(node)
 			}
 

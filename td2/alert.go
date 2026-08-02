@@ -868,6 +868,42 @@ func evaluateRPCNodeDownAlert(cc *ChainConfig) (bool, bool) {
 	return alert, resolved
 }
 
+func evaluateRPCNodeLaggingAlert(cc *ChainConfig) (bool, bool) {
+	alert, resolved := false, false
+
+	for _, node := range cc.Nodes {
+		alertID := fmt.Sprintf("RPCNodeLagging_%s_%s", cc.ValAddress, node.Url)
+		if node.AlertIfDown && node.lagging && !node.wasLagging && !node.laggingSince.IsZero() &&
+			time.Since(node.laggingSince) > time.Duration(td.NodeDownMin)*time.Minute {
+			if !alarms.exist(cc.name, alertID) {
+				td.alert(
+					cc.name,
+					fmt.Sprintf("Severity: %s\nRPC node %s has been lagging the chain head for > %d minutes on %s", td.NodeDownSeverity, node.Url, td.NodeDownMin, cc.ChainId),
+					td.NodeDownSeverity,
+					false,
+					&alertID,
+				)
+				alert = true
+			}
+		} else if node.AlertIfDown && !node.lagging && node.wasLagging {
+			node.wasLagging = false
+			if alarms.exist(cc.name, alertID) {
+				td.alert(
+					cc.name,
+					fmt.Sprintf("Severity: %s\nRPC node %s has been lagging the chain head for > %d minutes on %s", td.NodeDownSeverity, node.Url, td.NodeDownMin, cc.ChainId),
+					td.NodeDownSeverity,
+					true,
+					&alertID,
+				)
+				resolved = true
+			}
+		}
+	}
+
+	cc.activeAlerts = alarms.getCount(cc.name)
+	return alert, resolved
+}
+
 func evaluateStakeChangeAlert(cc *ChainConfig) (bool, bool) {
 	alert, resolved := false, false
 
@@ -1132,9 +1168,8 @@ func evaluateUnvotedGovernanceProposalAlert(cc *ChainConfig) (bool, bool) {
 	return alert, resolved
 }
 
-// watch handles monitoring for missed blocks, stalled chain, node downtime
+// watch handles monitoring for missed blocks, stalled chain, node downtime/lag
 // and also updates a few prometheus stats
-// FIXME: not watching for nodes that are lagging the head block!
 func (cc *ChainConfig) watch() {
 	// wait until we have a moniker:
 	noNodesSec := 0
@@ -1207,6 +1242,9 @@ func (cc *ChainConfig) watch() {
 
 		// node down alarms
 		evaluateRPCNodeDownAlert(cc)
+
+		// node lagging-behind-head alarms
+		evaluateRPCNodeLaggingAlert(cc)
 
 		// validator stake change alerts
 		if boolVal(cc.Alerts.StakeChangeAlerts) {

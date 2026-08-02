@@ -151,6 +151,7 @@ Here is a list of all the alerts on Tenderduty.
 | ConsecutiveEmptyBlocks   | validator has proposed X consecutive empty blocks on chainY             | configured via `consecutive_empty_priority` |
 | PercentageEmptyBlocks    | validator has > X% empty blocks (Y of Z proposed blocks) on chainid ... | configured via `empty_percentage_priority`  |
 | RPCNodeDown              | RPC node X has been down for > Y minutes on chainZ                      | configured via `node_down_alert_severity`   |
+| RPCNodeLagging           | RPC node X has been lagging the chain head for > Y minutes on chainZ    | configured via `node_down_alert_severity`   |
 | UnvotedGovernanceProposal | There is an open proposal (#X) that the validator has not voted on      | warning                                     |
 | StakeChange              | Validator's stake has changed by more than X% on chainY                 | warning                                     |
 

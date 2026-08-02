@@ -1790,6 +1790,146 @@ func TestEvaluateRPCNodeDownAlert(t *testing.T) {
 	}
 }
 
+func TestEvaluateRPCNodeLaggingAlert(t *testing.T) {
+	// Setup test alarm cache
+	testAlarms := &alarmCache{
+		AllAlarms: make(map[string]map[string]alertMsgCache),
+		notifyMux: sync.RWMutex{},
+	}
+	originalAlarms := alarms
+	alarms = testAlarms
+	defer func() { alarms = originalAlarms }()
+
+	// Setup test td
+	originalTd := td
+	td = createTestConfig()
+	td.NodeDownMin = 2
+	td.NodeDownSeverity = "warning"
+	defer func() { td = originalTd }()
+
+	tests := []struct {
+		name             string
+		nodes            []*NodeConfig
+		existingAlert    bool
+		expectedAlert    bool
+		expectedResolved bool
+		description      string
+	}{
+		{
+			name: "should trigger alert when node has been lagging longer than threshold",
+			nodes: []*NodeConfig{
+				{
+					Url:          "http://node1.example.com",
+					AlertIfDown:  true,
+					lagging:      true,
+					wasLagging:   false,
+					laggingSince: time.Now().Add(-5 * time.Minute),
+				},
+			},
+			existingAlert:    false,
+			expectedAlert:    true,
+			expectedResolved: false,
+			description:      "Should alert when node has been lagging longer than threshold",
+		},
+		{
+			name: "should not trigger duplicate alert",
+			nodes: []*NodeConfig{
+				{
+					Url:          "http://node1.example.com",
+					AlertIfDown:  true,
+					lagging:      true,
+					wasLagging:   false,
+					laggingSince: time.Now().Add(-5 * time.Minute),
+				},
+			},
+			existingAlert:    true,
+			expectedAlert:    false,
+			expectedResolved: false,
+			description:      "Should not trigger duplicate alert",
+		},
+		{
+			name: "should resolve alert when node catches back up",
+			nodes: []*NodeConfig{
+				{
+					Url:          "http://node1.example.com",
+					AlertIfDown:  true,
+					lagging:      false,
+					wasLagging:   true,
+					laggingSince: time.Now().Add(-5 * time.Minute),
+				},
+			},
+			existingAlert:    true,
+			expectedAlert:    false,
+			expectedResolved: true,
+			description:      "Should resolve alert when node catches back up",
+		},
+		{
+			name: "should not alert if AlertIfDown is false",
+			nodes: []*NodeConfig{
+				{
+					Url:          "http://node1.example.com",
+					AlertIfDown:  false,
+					lagging:      true,
+					wasLagging:   false,
+					laggingSince: time.Now().Add(-5 * time.Minute),
+				},
+			},
+			existingAlert:    false,
+			expectedAlert:    false,
+			expectedResolved: false,
+			description:      "Should not alert if AlertIfDown is disabled",
+		},
+		{
+			name: "should not alert if node just started lagging",
+			nodes: []*NodeConfig{
+				{
+					Url:          "http://node1.example.com",
+					AlertIfDown:  true,
+					lagging:      true,
+					wasLagging:   false,
+					laggingSince: time.Now().Add(-30 * time.Second),
+				},
+			},
+			existingAlert:    false,
+			expectedAlert:    false,
+			expectedResolved: false,
+			description:      "Should not alert if node hasn't been lagging long enough",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset alarms for each test
+			testAlarms.AllAlarms = make(map[string]map[string]alertMsgCache)
+
+			cc := &ChainConfig{
+				name:       "test-chain",
+				ChainId:    "test-chain-1",
+				ValAddress: "testval123",
+				Nodes:      tt.nodes,
+			}
+
+			if tt.existingAlert && len(tt.nodes) > 0 {
+				testAlarms.AllAlarms["test-chain"] = make(map[string]alertMsgCache)
+				alertID := fmt.Sprintf("RPCNodeLagging_%s_%s", cc.ValAddress, tt.nodes[0].Url)
+				testAlarms.AllAlarms["test-chain"][alertID] = alertMsgCache{
+					Message:  "test alert",
+					SentTime: time.Now(),
+				}
+			}
+
+			alert, resolved := evaluateRPCNodeLaggingAlert(cc)
+
+			if alert != tt.expectedAlert {
+				t.Errorf("%s: expected alert %v, got %v", tt.description, tt.expectedAlert, alert)
+			}
+			if resolved != tt.expectedResolved {
+				t.Errorf("%s: expected resolved %v, got %v", tt.description, tt.expectedResolved, resolved)
+			}
+		})
+	}
+}
+
 func TestEvaluateStakeChangeAlert(t *testing.T) {
 	// Setup test alarm cache
 	testAlarms := &alarmCache{

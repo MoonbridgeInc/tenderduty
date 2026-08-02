@@ -18,6 +18,12 @@ How many seconds a node has been marked as unhealthy
 
 `tenderduty_endpoint_down_seconds{chain_id="chain-id",endpoint="http://somehost:26657",moniker="Moniker",name="Chain Name"} 0`
 
+### tenderduty_endpoint_syncing_seconds_behind
+
+How many seconds a node is behind the head of a chain
+
+`tenderduty_endpoint_syncing_seconds_behind{chain_id="chain-id",endpoint="http://somehost:26657",moniker="Moniker",name="Chain Name"} 0`
+
 ### tenderduty_missed_block_window
 
 The missed block aka slashing window

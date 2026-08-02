@@ -162,6 +162,7 @@ func saveOnExit(stateFile string, saved chan any) {
 			}
 		}
 		nodesDown := make(map[string]map[string]time.Time)
+		nodesLagging := make(map[string]map[string]time.Time)
 		for k, v := range td.Chains {
 			for _, node := range v.Nodes {
 				if node.down {
@@ -170,12 +171,19 @@ func saveOnExit(stateFile string, saved chan any) {
 					}
 					nodesDown[k][node.Url] = node.downSince
 				}
+				if node.lagging {
+					if nodesLagging[k] == nil {
+						nodesLagging[k] = make(map[string]time.Time)
+					}
+					nodesLagging[k][node.Url] = node.laggingSince
+				}
 			}
 		}
 		b, e := json.Marshal(&savedState{
-			Alarms:    alarms,
-			Blocks:    blocks,
-			NodesDown: nodesDown,
+			Alarms:       alarms,
+			Blocks:       blocks,
+			NodesDown:    nodesDown,
+			NodesLagging: nodesLagging,
 		})
 		if e != nil {
 			slog.Error("failed to marshal state", "err", e)

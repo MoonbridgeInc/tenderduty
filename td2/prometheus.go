@@ -159,8 +159,8 @@ func prometheusExporter(ctx context.Context, updates chan *promUpdate) {
 		metricLastBlockSecondsNotFinal: lastBlockSecUnfinalized,
 		metricTotalNodes:               nodesMonitored,
 		metricUnealthyNodes:            nodesUnhealthy,
-		metricNodeLagSeconds:           nodeLagSec,  // todo
-		metricNodeDownSeconds:          nodeDownSec, // todo
+		metricNodeLagSeconds:           nodeLagSec,
+		metricNodeDownSeconds:          nodeDownSec,
 		metricUnvotedProposals:         unvotedProposals,
 	}
 

@@ -159,9 +159,10 @@ type Config struct {
 // savedState is dumped to a JSON file at exit time, and is loaded at start. If successful it will prevent
 // duplicate alerts, and will show old blocks in the dashboard.
 type savedState struct {
-	Alarms    *alarmCache                     `json:"alarms"`
-	Blocks    map[string][]int                `json:"blocks"`
-	NodesDown map[string]map[string]time.Time `json:"nodes_down"`
+	Alarms       *alarmCache                     `json:"alarms"`
+	Blocks       map[string][]int                `json:"blocks"`
+	NodesDown    map[string]map[string]time.Time `json:"nodes_down"`
+	NodesLagging map[string]map[string]time.Time `json:"nodes_lagging"`
 }
 
 type ProviderConfig struct {
@@ -366,6 +367,10 @@ type NodeConfig struct {
 	syncing   bool
 	lastMsg   string
 	downSince time.Time
+
+	lagging      bool
+	wasLagging   bool
+	laggingSince time.Time
 }
 
 // PDConfig is the information required to send alerts to PagerDuty
@@ -706,6 +711,26 @@ func loadConfig(yamlFile, stateFile, chainConfigDirectory string, password *stri
 			}
 			if downCount == len(c.Chains[k].Nodes) {
 				c.Chains[k].noNodes = true
+			}
+		}
+	}
+
+	// we need to know if a node was already lagging to clear alarms and avoid
+	// resetting the debounce timer used by evaluateRPCNodeLaggingAlert on restart.
+	if saved.NodesLagging != nil {
+		for k, v := range saved.NodesLagging {
+			for nodeUrl := range v {
+				if !v[nodeUrl].IsZero() {
+					if c.Chains[k] != nil {
+						for j := range c.Chains[k].Nodes {
+							if c.Chains[k].Nodes[j].Url == nodeUrl {
+								c.Chains[k].Nodes[j].lagging = true
+								c.Chains[k].Nodes[j].wasLagging = true
+								c.Chains[k].Nodes[j].laggingSince = v[nodeUrl]
+							}
+						}
+					}
+				}
 			}
 		}
 	}
