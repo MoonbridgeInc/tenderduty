@@ -235,6 +235,9 @@ func notifySlack(msg *alertMsg) (err error) {
 	if !msg.slk {
 		return
 	}
+	if !shouldNotify(msg, slk) {
+		return
+	}
 	data, err := json.Marshal(buildSlackMessage(msg))
 	if err != nil {
 		return
@@ -432,19 +435,9 @@ type WebhookAlert struct {
 	GeneratorURL string            `json:"generatorURL,omitempty"`
 }
 
-func notifyWebhook(msg *alertMsg) (err error) {
-	if !msg.wh {
-		return nil
-	}
-	if !shouldNotify(msg, wh) {
-		return nil
-	}
-
-	// Skip sending resolved messages if disabled in config
-	if msg.resolved && boolVal(msg.alertConfig.Webhook.DisableResolveMessage) {
-		return nil
-	}
-
+// buildWebhookAlert converts a single alertMsg into the WebhookAlert shape used by
+// the generic webhook payload, shared by both the single-alert and digest paths.
+func buildWebhookAlert(msg *alertMsg) WebhookAlert {
 	status := "firing"
 	if msg.resolved {
 		status = "resolved"
@@ -456,7 +449,7 @@ func notifyWebhook(msg *alertMsg) (err error) {
 		endsAt = now
 	}
 
-	alert := WebhookAlert{
+	return WebhookAlert{
 		Status: status,
 		Labels: map[string]string{
 			"alertname":       msg.uniqueId,
@@ -475,9 +468,25 @@ func notifyWebhook(msg *alertMsg) (err error) {
 		EndsAt:      endsAt,
 		Fingerprint: msg.uniqueId,
 	}
+}
+
+func notifyWebhook(msg *alertMsg) (err error) {
+	if !msg.wh {
+		return nil
+	}
+	if !shouldNotify(msg, wh) {
+		return nil
+	}
+
+	// Skip sending resolved messages if disabled in config
+	if msg.resolved && boolVal(msg.alertConfig.Webhook.DisableResolveMessage) {
+		return nil
+	}
+
+	alert := buildWebhookAlert(msg)
 
 	payload := WebhookPayload{
-		Status:   status,
+		Status:   alert.Status,
 		Alerts:   []WebhookAlert{alert},
 		Version:  "1",
 		GroupKey: msg.chain,
@@ -509,6 +518,231 @@ func notifyWebhook(msg *alertMsg) (err error) {
 		return fmt.Errorf("webhook returned status %d for %s", resp.StatusCode, msg.chain)
 	}
 
+	return nil
+}
+
+// digestSummary builds a plain-text summary of msgs grouped by chain (in first-seen
+// order), firing alerts before resolved ones within each chain. Shared by the
+// Discord/Telegram/Slack digest messages.
+func digestSummary(msgs []*alertMsg) string {
+	firingByChain := make(map[string][]string)
+	resolvedByChain := make(map[string][]string)
+	var chainOrder []string
+	seen := make(map[string]bool)
+	firingCount, resolvedCount := 0, 0
+
+	for _, m := range msgs {
+		if !seen[m.chain] {
+			seen[m.chain] = true
+			chainOrder = append(chainOrder, m.chain)
+		}
+		if m.resolved {
+			resolvedByChain[m.chain] = append(resolvedByChain[m.chain], m.message)
+			resolvedCount++
+		} else {
+			firingByChain[m.chain] = append(firingByChain[m.chain], m.message)
+			firingCount++
+		}
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d new alert(s), %d resolved\n", firingCount, resolvedCount)
+	for _, chain := range chainOrder {
+		if items := firingByChain[chain]; len(items) > 0 {
+			fmt.Fprintf(&b, "\n🚨 %s:\n", chain)
+			for _, msg := range items {
+				fmt.Fprintf(&b, "- %s\n", msg)
+			}
+		}
+		if items := resolvedByChain[chain]; len(items) > 0 {
+			fmt.Fprintf(&b, "\n💜 %s (resolved):\n", chain)
+			for _, msg := range items {
+				fmt.Fprintf(&b, "- %s\n", msg)
+			}
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func buildDiscordDigestMessage(msgs []*alertMsg) *DiscordMessage {
+	firing, resolved := 0, 0
+	for _, m := range msgs {
+		if m.resolved {
+			resolved++
+		} else {
+			firing++
+		}
+	}
+	return &DiscordMessage{
+		Username: "Tenderduty",
+		Content:  fmt.Sprintf("📋 Alert digest: %d new, %d resolved", firing, resolved),
+		Embeds: []DiscordEmbed{{
+			Description: digestSummary(msgs),
+		}},
+	}
+}
+
+// notifyDiscordDigest sends one combined message for msgs, which must already have
+// passed shouldNotify (done once, at enqueue time, by the digester) — this function
+// does not call shouldNotify again.
+func notifyDiscordDigest(msgs []*alertMsg) (err error) {
+	if len(msgs) == 0 {
+		return nil
+	}
+	discPost := buildDiscordDigestMessage(msgs)
+	client := &http.Client{}
+	data, err := json.MarshalIndent(discPost, "", "  ")
+	if err != nil {
+		l(slog.LevelWarn, "⚠️ Could not notify discord digest!", err)
+		return err
+	}
+
+	req, err := http.NewRequest("POST", msgs[0].discHook, bytes.NewBuffer(data))
+	if err != nil {
+		l(slog.LevelWarn, "⚠️ Could not notify discord digest!", err)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req) //#nosec G704 -- URL is from operator-supplied config
+	if err != nil {
+		l(slog.LevelWarn, "⚠️ Could not notify discord digest!", err)
+		return err
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != 204 {
+		l(slog.LevelWarn, "⚠️ Could not notify discord digest! Returned", resp.StatusCode)
+		return fmt.Errorf("discord digest webhook returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
+// notifyTgDigest sends one combined telegram message for msgs, which must already
+// have passed shouldNotify at enqueue time.
+func notifyTgDigest(msgs []*alertMsg) (err error) {
+	if len(msgs) == 0 {
+		return nil
+	}
+	bot, err := tgbotapi.NewBotAPI(msgs[0].tgKey)
+	if err != nil {
+		l(slog.LevelWarn, "notify telegram digest:", err)
+		return err
+	}
+	text := fmt.Sprintf("Digest (%d alerts):\n%s", len(msgs), digestSummary(msgs))
+	mc := tgbotapi.NewMessageToChannel(msgs[0].tgChannel, text)
+	_, err = bot.Send(mc)
+	if err != nil {
+		l(slog.LevelWarn, "telegram digest send:", err)
+	}
+	return err
+}
+
+func buildSlackDigestMessage(msgs []*alertMsg) *SlackMessage {
+	firing, resolved := 0, 0
+	for _, m := range msgs {
+		if m.resolved {
+			resolved++
+		} else {
+			firing++
+		}
+	}
+	color := "danger"
+	if firing == 0 {
+		color = "good"
+	}
+	return &SlackMessage{
+		Text: digestSummary(msgs),
+		Attachments: []Attachment{
+			{
+				Title: fmt.Sprintf("TenderDuty Alert Digest: %d new, %d resolved %s", firing, resolved, msgs[0].slkMentions),
+				Color: color,
+			},
+		},
+	}
+}
+
+// notifySlackDigest sends one combined message for msgs, which must already have
+// passed shouldNotify at enqueue time.
+func notifySlackDigest(msgs []*alertMsg) (err error) {
+	if len(msgs) == 0 {
+		return nil
+	}
+	data, err := json.Marshal(buildSlackDigestMessage(msgs))
+	if err != nil {
+		return err
+	}
+
+	req, err := http.NewRequest("POST", msgs[0].slkHook, bytes.NewBuffer(data))
+	if err != nil {
+		return err
+	}
+
+	client := &http.Client{}
+	resp, err := client.Do(req) //#nosec G704 -- URL is from operator-supplied config
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("could not notify slack digest, got %d response", resp.StatusCode)
+	}
+	return nil
+}
+
+// buildWebhookDigestPayload combines msgs into a single WebhookPayload. GroupKey is a
+// fixed sentinel since a digest batch has no single stable alert identity across
+// flushes, unlike a single-alert payload's GroupKey (the chain name).
+func buildWebhookDigestPayload(msgs []*alertMsg) WebhookPayload {
+	alerts := make([]WebhookAlert, 0, len(msgs))
+	status := "resolved"
+	for _, m := range msgs {
+		alerts = append(alerts, buildWebhookAlert(m))
+		if !m.resolved {
+			status = "firing"
+		}
+	}
+	return WebhookPayload{
+		Status:   status,
+		Alerts:   alerts,
+		Version:  "1",
+		GroupKey: "tenderduty-digest",
+	}
+}
+
+// notifyWebhookDigest sends one combined payload for msgs, which must already have
+// passed shouldNotify (and the DisableResolveMessage filter) at enqueue time.
+func notifyWebhookDigest(msgs []*alertMsg) (err error) {
+	if len(msgs) == 0 {
+		return nil
+	}
+	payload := buildWebhookDigestPayload(msgs)
+	data, err := json.Marshal(payload)
+	if err != nil {
+		l(slog.LevelWarn, "⚠️ Could not marshal webhook digest payload!", err)
+		return err
+	}
+
+	req, err := http.NewRequest("POST", msgs[0].whURL, bytes.NewBuffer(data))
+	if err != nil {
+		l(slog.LevelWarn, "⚠️ Could not create webhook digest request!", err)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req) //#nosec G704 -- URL is from operator-supplied config
+	if err != nil {
+		l(slog.LevelWarn, "⚠️ Could not send webhook digest!", err)
+		return err
+	}
+	_ = resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		l(slog.LevelWarn, "⚠️ Webhook digest returned non-success status:", resp.StatusCode)
+		return fmt.Errorf("webhook digest returned status %d", resp.StatusCode)
+	}
 	return nil
 }
 

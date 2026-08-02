@@ -132,6 +132,14 @@ type Config struct {
 	// NodeDownSeverity controls the Pagerduty severity when notifying if a node is down.
 	NodeDownSeverity string `yaml:"node_down_alert_severity"`
 
+	// DigestIntervalSeconds, when greater than zero, enables "digest" mode: alerts destined
+	// for Discord, Telegram, Slack, and the generic webhook that fire within this many
+	// seconds of each other are batched into a single combined message per destination
+	// instead of one message per alert. 0 (the default) preserves the original immediate
+	// behavior. PagerDuty is never batched — it uses a DedupKey per alert to resolve
+	// individual incidents, which batching would break.
+	DigestIntervalSeconds int `yaml:"digest_interval_seconds"`
+
 	// whether skip the TLS verification
 	TLSSkipVerify bool `yaml:"tls_skip_verify"`
 

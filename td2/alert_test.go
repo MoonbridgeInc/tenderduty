@@ -404,6 +404,20 @@ func TestBuildDiscordMessage(t *testing.T) {
 }
 
 func TestNotifySlack(t *testing.T) {
+	testAlarms := &alarmCache{
+		SentPdAlarms:   make(map[string]alertMsgCache),
+		SentTgAlarms:   make(map[string]alertMsgCache),
+		SentDiAlarms:   make(map[string]alertMsgCache),
+		SentSlkAlarms:  make(map[string]alertMsgCache),
+		SentWHAlarms:   make(map[string]alertMsgCache),
+		AllAlarms:      make(map[string]map[string]alertMsgCache),
+		flappingAlarms: make(map[string]map[string]alertMsgCache),
+		notifyMux:      sync.RWMutex{},
+	}
+	originalAlarms := alarms
+	alarms = testAlarms
+	defer func() { alarms = originalAlarms }()
+
 	tests := []struct {
 		name           string
 		msg            *alertMsg
@@ -416,9 +430,14 @@ func TestNotifySlack(t *testing.T) {
 				slk:         true,
 				chain:       "test-chain",
 				message:     "test message",
+				severity:    "critical",
 				resolved:    false,
+				uniqueId:    "test_slack_alert_1",
 				slkMentions: "@here",
 				slkHook:     "", // will be set to test server URL
+				alertConfig: &AlertConfig{
+					Slack: SlackConfig{SeverityThreshold: "info"},
+				},
 			},
 			serverResponse: 200,
 			expectError:    false,
@@ -429,9 +448,14 @@ func TestNotifySlack(t *testing.T) {
 				slk:         true,
 				chain:       "test-chain",
 				message:     "test message",
+				severity:    "critical",
 				resolved:    false,
+				uniqueId:    "test_slack_alert_2",
 				slkMentions: "@here",
 				slkHook:     "", // will be set to test server URL
+				alertConfig: &AlertConfig{
+					Slack: SlackConfig{SeverityThreshold: "info"},
+				},
 			},
 			serverResponse: 500,
 			expectError:    true,

@@ -32,15 +32,25 @@ func Run(configFile, stateFile, chainConfigDirectory string, password *string, d
 
 	defer td.cancel()
 
+	var dg *digester
+	if td.DigestIntervalSeconds > 0 {
+		dg = newDigester(time.Duration(td.DigestIntervalSeconds) * time.Second)
+		go dg.run(td.ctx)
+	}
+
 	go func() {
 		for {
 			select {
 			case alert := <-td.alertChan:
 				go func(msg *alertMsg) {
 					var e error
-					e = notifyPagerduty(msg)
+					e = notifyPagerduty(msg) // never batched
 					if e != nil {
 						l(slog.LevelWarn, msg.chain, "error sending alert to pagerduty", e.Error())
+					}
+					if dg != nil {
+						dg.enqueue(msg)
+						return
 					}
 					e = notifyDiscord(msg)
 					if e != nil {

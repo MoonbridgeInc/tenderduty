@@ -11,6 +11,10 @@ hide_logs: no
 node_down_alert_minutes: 3
 # Node Down alert Pagerduty Severity
 node_down_alert_severity: critical
+# Optional: batch Discord/Telegram/Slack/webhook alerts that fire within this many
+# seconds into one combined message per destination, instead of one message per alert.
+# 0 (default) sends every alert immediately, unchanged. PagerDuty is never batched.
+digest_interval_seconds: 0
 # whether skip the verification of TLS certificates, when set to `yes` Tenderduty will skip certificate verification and accept self-signed certs
 # NOTE: this flag should be false in a production environment
 tls_skip_verify: no
