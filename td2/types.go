@@ -332,6 +332,11 @@ type AlertConfig struct {
 	// AlertIfNoServers: should an alert be sent if no servers are reachable?
 	AlertIfNoServers *bool `yaml:"alert_if_no_servers"`
 
+	// DoubleSignAlerts controls whether an alert is sent when tendermint reports DuplicateVoteEvidence
+	// (double-signing) against the monitored validator's consensus key. This is a critical, one-shot
+	// alert: double-signing evidence almost always means the validator has been or will be tombstoned.
+	DoubleSignAlerts *bool `yaml:"double_sign_alerts"`
+
 	// Whether to alert on unvoted governance proposals
 	GovernanceAlerts *bool `yaml:"governance_alerts"`
 

@@ -146,6 +146,7 @@ Here is a list of all the alerts on Tenderduty.
 | ChainStalled             | stalled: have not seen a new block on chainX in Y minutes               | critical                                    |
 | NoRPCEndpoints           | no RPC endpoints are working for chainX                                 | critical                                    |
 | ValidatorInactive        | validator X is tombstoned for chainY                                    | critical                                    |
+| DoubleSignEvidence        | DOUBLE SIGN EVIDENCE: validator X signed conflicting votes at height Y (round Z) on chainW | critical                    |
 | ConsecutiveBlocksMissed  | validator has missed X blocks on chainY                                 | configured via `consecutive_priority`       |
 | PercentageBlocksMissed   | validator has missed > X% of the slashing window's blocks on chainY     | configured via `percentage_priority`        |
 | ConsecutiveEmptyBlocks   | validator has proposed X consecutive empty blocks on chainY             | configured via `consecutive_empty_priority` |

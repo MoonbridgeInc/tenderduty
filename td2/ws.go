@@ -18,8 +18,9 @@ import (
 )
 
 const (
-	QueryNewBlock string = `tm.event='NewBlock'`
-	QueryVote     string = `tm.event='Vote'`
+	QueryNewBlock    string = `tm.event='NewBlock'`
+	QueryVote        string = `tm.event='Vote'`
+	QueryNewEvidence string = `tm.event='NewEvidence'`
 )
 
 // StatusType represents the various possible end states. Prevote and Precommit are special cases, where the node
@@ -246,17 +247,22 @@ func (cc *ChainConfig) WsRun() {
 		}
 	}()
 
+	address := strings.ToUpper(hex.EncodeToString(cc.valInfo.Conspub))
+
 	voteChan := make(chan *WsReply)
-	go handleVotes(ctx, voteChan, resultChan, strings.ToUpper(hex.EncodeToString(cc.valInfo.Conspub)))
+	go handleVotes(ctx, voteChan, resultChan, address)
 
 	blockChan := make(chan *WsReply)
 	go func() {
-		e := handleBlocks(ctx, blockChan, resultChan, strings.ToUpper(hex.EncodeToString(cc.valInfo.Conspub)))
+		e := handleBlocks(ctx, blockChan, resultChan, address)
 		if e != nil {
 			l(slog.LevelError, "🛑", cc.ChainId, e)
 			cancel()
 		}
 	}()
+
+	evidenceChan := make(chan *WsReply)
+	go handleEvidence(ctx, evidenceChan, cc.name, cc.ChainId, cc.ValAddress, address, boolVal(cc.Alerts.DoubleSignAlerts))
 
 	// now that channel consumers are up, create our subscriptions and route data.
 	go func() {
@@ -279,13 +285,15 @@ func (cc *ChainConfig) WsRun() {
 				blockChan <- reply
 			case `tendermint/event/Vote`:
 				voteChan <- reply
+			case `tendermint/event/NewEvidence`:
+				evidenceChan <- reply
 			default:
 				// fmt.Println("unknown response", reply.Type())
 			}
 		}
 	}()
 
-	for _, subscribe := range []string{QueryNewBlock, QueryVote} {
+	for _, subscribe := range []string{QueryNewBlock, QueryVote, QueryNewEvidence} {
 		q := fmt.Sprintf(`{"jsonrpc":"2.0","method":"subscribe","id":1,"params":{"query":"%s"}}`, subscribe)
 		err = cc.wsclient.WriteMessage(websocket.TextMessage, []byte(q))
 		if err != nil {
@@ -294,7 +302,7 @@ func (cc *ChainConfig) WsRun() {
 			break
 		}
 	}
-	l(fmt.Sprintf("⚙️ %-12s watching for NewBlock and Vote events via %s", cc.ChainId, wsURL))
+	l(fmt.Sprintf("⚙️ %-12s watching for NewBlock, Vote, and NewEvidence events via %s", cc.ChainId, wsURL))
 	for {
 		select {
 		case <-cc.client.Quit():
@@ -424,6 +432,76 @@ func handleVotes(ctx context.Context, votes chan *WsReply, results chan StatusUp
 				results <- upd
 			}
 
+		case <-ctx.Done():
+			return
+		}
+	}
+}
+
+// rawEvidenceVote is a trimmed down version of the vote embedded in DuplicateVoteEvidence.
+type rawEvidenceVote struct {
+	Height           stringInt64 `json:"height"`
+	Round            int32       `json:"round"`
+	ValidatorAddress string      `json:"validator_address"`
+}
+
+// rawDuplicateVoteEvidence is a trimmed down version of tendermint's DuplicateVoteEvidence.
+type rawDuplicateVoteEvidence struct {
+	VoteA rawEvidenceVote `json:"vote_a"`
+	VoteB rawEvidenceVote `json:"vote_b"`
+}
+
+// rawEvidence is a trimmed down version of the NewEvidence subscription result. The Evidence
+// field is polymorphic on the wire (tendermint's own {"type", "value"} envelope, same shape as
+// WsReply's outer envelope), since tendermint registers multiple evidence types.
+type rawEvidence struct {
+	Evidence struct {
+		Type  string          `json:"type"`
+		Value json.RawMessage `json:"value"`
+	} `json:"evidence"`
+}
+
+// parseDuplicateVoteEvidence extracts DuplicateVoteEvidence from a NewEvidence subscription reply.
+// Other evidence types (e.g. LightClientAttackEvidence, which reports chain/fork-level attacks
+// rather than a specific validator's signing key) are out of scope and return ok=false.
+func parseDuplicateVoteEvidence(reply *WsReply) (dve *rawDuplicateVoteEvidence, ok bool) {
+	ev := &rawEvidence{}
+	if err := json.Unmarshal(reply.Value(), ev); err != nil {
+		return nil, false
+	}
+	if ev.Evidence.Type != "tendermint/DuplicateVoteEvidence" {
+		return nil, false
+	}
+	dve = &rawDuplicateVoteEvidence{}
+	if err := json.Unmarshal(ev.Evidence.Value, dve); err != nil {
+		return nil, false
+	}
+	return dve, true
+}
+
+// handleEvidence consumes the channel for double-sign (DuplicateVoteEvidence) reports and alerts
+// immediately if the evidence implicates our validator's consensus key — this is a critical,
+// near-instant tombstone/slashing event, unlike the debounced node-down/lag alerts.
+func handleEvidence(ctx context.Context, evidence chan *WsReply, chainName, chainId, valAddress, address string, alertEnabled bool) {
+	for {
+		select {
+		case reply := <-evidence:
+			dve, ok := parseDuplicateVoteEvidence(reply)
+			if !ok || (dve.VoteA.ValidatorAddress != address && dve.VoteB.ValidatorAddress != address) {
+				continue
+			}
+			height := dve.VoteA.Height.val()
+			alertID := fmt.Sprintf("DoubleSignEvidence_%s_%d", valAddress, height)
+			l(slog.LevelError, fmt.Sprintf("🚨 %-12s DOUBLE SIGN EVIDENCE at height %d for validator %s", chainName, height, valAddress))
+			if alertEnabled && !alarms.exist(chainName, alertID) {
+				td.alert(
+					chainName,
+					fmt.Sprintf("🚨 DOUBLE SIGN EVIDENCE: validator %s signed conflicting votes at height %d (round %d) on %s — this validator has very likely been slashed and tombstoned", valAddress, height, dve.VoteA.Round, chainId),
+					"critical",
+					false,
+					&alertID,
+				)
+			}
 		case <-ctx.Done():
 			return
 		}
