@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	github_com_cosmos_cosmos_sdk_types "github.com/cosmos/cosmos-sdk/types"
@@ -159,10 +160,11 @@ type Config struct {
 // savedState is dumped to a JSON file at exit time, and is loaded at start. If successful it will prevent
 // duplicate alerts, and will show old blocks in the dashboard.
 type savedState struct {
-	Alarms       *alarmCache                     `json:"alarms"`
-	Blocks       map[string][]int                `json:"blocks"`
-	NodesDown    map[string]map[string]time.Time `json:"nodes_down"`
-	NodesLagging map[string]map[string]time.Time `json:"nodes_lagging"`
+	Alarms        *alarmCache                     `json:"alarms"`
+	Blocks        map[string][]int                `json:"blocks"`
+	NodesDown     map[string]map[string]time.Time `json:"nodes_down"`
+	NodesLagging  map[string]map[string]time.Time `json:"nodes_lagging"`
+	SilencedUntil map[string]int64                `json:"silenced_until"`
 }
 
 type ProviderConfig struct {
@@ -197,6 +199,12 @@ type ChainConfig struct {
 	lastBlockNum            int64
 	activeAlerts            int
 	unvotedOpenGovProposals []gov.Proposal // the open proposals that the validator has not voted on
+
+	// silencedUntil is unix seconds; alert dispatch is suppressed for this chain while
+	// now < silencedUntil and silencedUntil > 0. Set via silenceChain/unsilenceChain
+	// (silence.go); read via silenceStatus(). Atomic because the writer is an HTTP
+	// handler goroutine, genuinely concurrent with readers on other goroutines.
+	silencedUntil atomic.Int64
 
 	statTotalSigns       float64
 	statTotalProps       float64
@@ -251,10 +259,21 @@ func (cc *ChainConfig) mkUpdate(t metricType, v float64, node string) *promUpdat
 	}
 }
 
+// silenceStatus reports whether alert dispatch is currently suppressed for cc, and
+// the unix-seconds timestamp it's silenced until (0 if not silenced or expired).
+func (cc *ChainConfig) silenceStatus() (silenced bool, until int64) {
+	u := cc.silencedUntil.Load()
+	if u > 0 && time.Now().Unix() < u {
+		return true, u
+	}
+	return false, 0
+}
+
 // toDashStatus builds a dashboard snapshot for cc to be sent over Config.updateChan.
 // height, lastError, healthyNodes, and activeAlerts vary by call site; everything
 // else is read directly off the current chain/validator state.
 func (cc *ChainConfig) toDashStatus(height int64, lastError string, healthyNodes, activeAlerts int) *dash.ChainStatus {
+	silenced, silencedUntil := cc.silenceStatus()
 	return &dash.ChainStatus{
 		MsgType:                 "status",
 		Name:                    cc.name,
@@ -271,6 +290,8 @@ func (cc *ChainConfig) toDashStatus(height int64, lastError string, healthyNodes
 		ActiveAlerts:            activeAlerts,
 		Height:                  height,
 		LastError:               lastError,
+		Silenced:                silenced,
+		SilencedUntil:           silencedUntil,
 		Blocks:                  cc.blocksResults,
 		UnvotedOpenGovProposals: len(cc.unvotedOpenGovProposals),
 		TotalBondedTokens:       cc.totalBondedTokens,
@@ -736,6 +757,17 @@ func loadConfig(yamlFile, stateFile, chainConfigDirectory string, password *stri
 						}
 					}
 				}
+			}
+		}
+	}
+
+	// restore any silence window that hasn't already expired, so a tenderduty restart
+	// mid-maintenance doesn't drop the safety net that was deliberately requested.
+	if saved.SilencedUntil != nil {
+		now := time.Now().Unix()
+		for k, until := range saved.SilencedUntil {
+			if until > now && c.Chains[k] != nil {
+				c.Chains[k].silencedUntil.Store(until)
 			}
 		}
 	}

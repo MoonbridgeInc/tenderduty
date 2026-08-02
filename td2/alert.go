@@ -565,7 +565,12 @@ func (c *Config) alert(configName, message, severity string, resolved bool, id *
 		whURL:          cc.Alerts.Webhook.URL,
 		alertConfig:    &cc.Alerts,
 	}
-	c.alertChan <- a
+	silenced, _ := cc.silenceStatus()
+	if silenced {
+		l(slog.LevelInfo, configName, "🔇 chain is silenced, suppressing alert dispatch:", message)
+	} else {
+		c.alertChan <- a
+	}
 	c.chainsMux.RUnlock()
 	alarms.notifyMux.Lock()
 	defer alarms.notifyMux.Unlock()
@@ -576,6 +581,12 @@ func (c *Config) alert(configName, message, severity string, resolved bool, id *
 		delete(alarms.AllAlarms[configName], *id)
 		return
 	} else if resolved {
+		return
+	}
+	if silenced {
+		// Don't cache a "sent" record — alarms.exist() gates whether evaluate* calls
+		// alert() again, so leaving this uncached makes the next tick retry (and
+		// dispatch for real, once unsilenced) with no extra expiry machinery.
 		return
 	}
 	cache := alertMsgCache{

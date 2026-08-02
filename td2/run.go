@@ -66,7 +66,7 @@ func Run(configFile, stateFile, chainConfigDirectory string, password *string, d
 	}()
 
 	if td.EnableDash {
-		go dash.Serve(td.Listen, td.updateChan, td.logChan, td.HideLogs, devMode)
+		go dash.Serve(td.Listen, td.updateChan, td.logChan, td.HideLogs, devMode, silenceChain, unsilenceChain)
 		l(slog.LevelInfo, "starting dashboard on ", td.Listen)
 	} else {
 		go func() {
@@ -179,11 +179,19 @@ func saveOnExit(stateFile string, saved chan any) {
 				}
 			}
 		}
+		silencedUntil := make(map[string]int64)
+		now := time.Now().Unix()
+		for k, v := range td.Chains {
+			if u := v.silencedUntil.Load(); u > now {
+				silencedUntil[k] = u
+			}
+		}
 		b, e := json.Marshal(&savedState{
-			Alarms:       alarms,
-			Blocks:       blocks,
-			NodesDown:    nodesDown,
-			NodesLagging: nodesLagging,
+			Alarms:        alarms,
+			Blocks:        blocks,
+			NodesDown:     nodesDown,
+			NodesLagging:  nodesLagging,
+			SilencedUntil: silencedUntil,
 		})
 		if e != nil {
 			slog.Error("failed to marshal state", "err", e)

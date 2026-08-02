@@ -9,6 +9,7 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -24,7 +25,8 @@ var (
 
 const logLength = 256
 
-func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLogs bool, devMode bool) {
+func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLogs bool, devMode bool,
+	silence func(chain string, minutes int) (time.Time, error), unsilence func(chain string) error) {
 	var err error
 	rootDir, err = fs.Sub(Content, "static")
 	if err != nil {
@@ -141,6 +143,51 @@ func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLog
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
 		_, _ = writer.Write(statusCache)
+	})
+
+	http.HandleFunc("/silence", func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set("Access-Control-Allow-Origin", "*")
+		if request.Method != http.MethodPost {
+			writer.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		chain := request.URL.Query().Get("chain")
+		minutes, err := strconv.Atoi(request.URL.Query().Get("minutes"))
+		if chain == "" || err != nil {
+			writer.WriteHeader(http.StatusBadRequest)
+			_, _ = writer.Write([]byte(`{"error":"chain and minutes (integer) are required"}`))
+			return
+		}
+		until, sErr := silence(chain, minutes)
+		if sErr != nil {
+			writer.WriteHeader(http.StatusBadRequest)
+			_, _ = writer.Write([]byte(`{"error":"` + sErr.Error() + `"}`))
+			return
+		}
+		j, _ := json.Marshal(map[string]any{"chain": chain, "silenced_until": until.Unix()})
+		_, _ = writer.Write(j)
+	})
+
+	http.HandleFunc("/unsilence", func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set("Access-Control-Allow-Origin", "*")
+		if request.Method != http.MethodPost {
+			writer.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		chain := request.URL.Query().Get("chain")
+		if chain == "" {
+			writer.WriteHeader(http.StatusBadRequest)
+			_, _ = writer.Write([]byte(`{"error":"chain is required"}`))
+			return
+		}
+		if err := unsilence(chain); err != nil {
+			writer.WriteHeader(http.StatusBadRequest)
+			_, _ = writer.Write([]byte(`{"error":"` + err.Error() + `"}`))
+			return
+		}
+		_, _ = writer.Write([]byte(`{"ok":true}`))
 	})
 
 	http.Handle("/", &CacheHandler{

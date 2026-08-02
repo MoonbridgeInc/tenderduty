@@ -93,6 +93,11 @@ body {
   box-shadow: 0 0 3px rgba(153, 153, 153, 0.5);
 }
 
+.status-indicator-blue {
+  background-color: #4dabf7; /* Silenced/maintenance mode */
+  box-shadow: 0 0 5px rgba(77, 171, 247, 0.7);
+}
+
 /* Style for the cell containing the indicator */
 #statusTableRoot td.status-cell {
   width: 60px; /* Give it a fixed width */

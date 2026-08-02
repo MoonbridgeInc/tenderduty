@@ -156,6 +156,28 @@ Here is a list of all the alerts on Tenderduty.
 | UnvotedGovernanceProposal | There is an open proposal (#X) that the validator has not voted on      | warning                                     |
 | StakeChange              | Validator's stake has changed by more than X% on chainY                 | warning                                     |
 
+### Maintenance / silence mode
+
+Before planned maintenance (a node upgrade or restart), you can temporarily suppress
+outbound alert notifications for a chain so routine, expected downtime doesn't page
+anyone. This only suppresses dispatch to PagerDuty/Discord/Telegram/Slack/webhook —
+the dashboard still honestly reflects any issue detected while silenced.
+
+```
+POST /silence?chain=<name>&minutes=<1-1440>
+POST /unsilence?chain=<name>
+```
+
+`chain` is the name of the chain as it appears as a key under `chains:` in your
+config. `minutes` must be between 1 and 1440 (24 hours) — a silence always expires on
+its own, and it also survives a tenderduty restart so a redeploy mid-maintenance
+doesn't drop the safety net. While active, the dashboard shows a blue "Silenced"
+indicator with a tooltip showing when it expires.
+
+These endpoints are **unauthenticated**, matching every other dashboard endpoint
+(`/state`, `/logs`, `/ws`) — only expose the dashboard's port on a trusted network if
+that matters for your deployment.
+
 ### Support for Namada
 
 For Namada, lots of information can be fetched via Namada indexers, instead of using ABCI queries. Thus we implement the provider pattern so that the queries can be dynamically adjusted based on the type of chains. The following configuration needs to be added for a Namada validator:

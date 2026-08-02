@@ -22,6 +22,8 @@ type ChainStatus struct {
 	ActiveAlerts            int                                          `json:"active_alerts"`
 	Height                  int64                                        `json:"height"`
 	LastError               string                                       `json:"last_error"`
+	Silenced                bool                                         `json:"silenced"`
+	SilencedUntil           int64                                        `json:"silenced_until"`
 	UnvotedOpenGovProposals int                                          `json:"unvoted_open_gov_proposals"`
 	TotalBondedTokens       float64                                      `json:"total_bonded_tokens"`
 	TotalSupply             float64                                      `json:"total_supply"`

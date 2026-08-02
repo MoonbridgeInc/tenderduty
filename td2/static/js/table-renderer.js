@@ -46,7 +46,15 @@ export class TableRenderer {
       `;
     }
 
-    if (status.active_alerts > 0) {
+    if (status.silenced) {
+      statusClass = "status-indicator-blue";
+      statusText = status.silenced_until
+        ? `Silenced until ${new Date(status.silenced_until * 1000).toLocaleString()}`
+        : "Silenced";
+      if (status.last_error !== "") {
+        toggleAttribute = `uk-toggle="target: #${modalId}"`;
+      }
+    } else if (status.active_alerts > 0) {
       statusClass = "status-indicator-yellow";
       statusText = `${_.escape(status.active_alerts)} active issues`;
       // Make yellow indicator clickable only if there's an error modal to show

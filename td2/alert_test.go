@@ -2175,6 +2175,98 @@ func TestEvaluateStakeChangeAlert(t *testing.T) {
 	}
 }
 
+func TestAlertSuppressedWhileSilenced(t *testing.T) {
+	testAlarms := &alarmCache{
+		AllAlarms: make(map[string]map[string]alertMsgCache),
+		notifyMux: sync.RWMutex{},
+	}
+	originalAlarms := alarms
+	alarms = testAlarms
+	defer func() { alarms = originalAlarms }()
+
+	originalTd := td
+	td = createTestConfig()
+	defer func() { td = originalTd }()
+
+	notSilencedID := "TestAlert_not_silenced"
+	td.alert("test-chain", "test message", "critical", false, &notSilencedID)
+	select {
+	case <-td.alertChan:
+	default:
+		t.Fatal("expected alert to be dispatched when chain is not silenced")
+	}
+
+	td.Chains["test-chain"].silencedUntil.Store(time.Now().Add(10 * time.Minute).Unix())
+
+	silencedID := "TestAlert_silenced"
+	td.alert("test-chain", "test message", "critical", false, &silencedID)
+	select {
+	case <-td.alertChan:
+		t.Fatal("expected alert to be suppressed while chain is silenced")
+	default:
+	}
+	if alarms.exist("test-chain", silencedID) {
+		t.Fatal("expected a suppressed alert to NOT be cached, so it can retry once unsilenced")
+	}
+
+	// once unsilenced, the same alert ID should dispatch for real (self-healing,
+	// not permanently suppressed).
+	td.Chains["test-chain"].silencedUntil.Store(0)
+	td.alert("test-chain", "test message", "critical", false, &silencedID)
+	select {
+	case <-td.alertChan:
+	default:
+		t.Fatal("expected alert to dispatch again after unsilencing")
+	}
+}
+
+func TestSilenceChain(t *testing.T) {
+	originalTd := td
+	td = createTestConfig()
+	defer func() { td = originalTd }()
+
+	until, err := silenceChain("test-chain", 30)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if until.Before(time.Now().Add(29 * time.Minute)) {
+		t.Errorf("expected silence to last ~30 minutes, got until=%v", until)
+	}
+	if got := td.Chains["test-chain"].silencedUntil.Load(); got != until.Unix() {
+		t.Errorf("expected stored silencedUntil %d, got %d", until.Unix(), got)
+	}
+
+	if _, err := silenceChain("test-chain", 0); err == nil {
+		t.Error("expected error for minutes below the valid range")
+	}
+	if _, err := silenceChain("test-chain", maxSilenceMinutes+1); err == nil {
+		t.Error("expected error for minutes above the valid range")
+	}
+	if _, err := silenceChain("no-such-chain", 30); err == nil {
+		t.Error("expected error for unknown chain")
+	}
+}
+
+func TestUnsilenceChain(t *testing.T) {
+	originalTd := td
+	td = createTestConfig()
+	defer func() { td = originalTd }()
+
+	if _, err := silenceChain("test-chain", 30); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := unsilenceChain("test-chain"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := td.Chains["test-chain"].silencedUntil.Load(); got != 0 {
+		t.Errorf("expected silencedUntil to be cleared to 0, got %d", got)
+	}
+
+	if err := unsilenceChain("no-such-chain"); err == nil {
+		t.Error("expected error for unknown chain")
+	}
+}
+
 func TestEvaluateUnvotedGovernanceProposalAlert(t *testing.T) {
 	// Setup test alarm cache
 	testAlarms := &alarmCache{
