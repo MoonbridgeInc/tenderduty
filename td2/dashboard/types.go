@@ -48,3 +48,13 @@ type LogMessage struct {
 	Ts      int64  `json:"ts"`
 	Msg     string `json:"msg"`
 }
+
+type AlertHistoryEntry struct {
+	MsgType  string `json:"msgType"`
+	Time     int64  `json:"time"`
+	Chain    string `json:"chain"`
+	ChainId  string `json:"chain_id"`
+	Message  string `json:"message"`
+	Severity string `json:"severity"`
+	Resolved bool   `json:"resolved"`
+}

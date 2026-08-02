@@ -246,28 +246,32 @@ body {
    flex: initial !important; /* Override uk-width-expand's flex: 1 */
 }
 
-#logContainerWrapper {
+/* Shared layout for the Logs and Alert History panels — both stack inside
+   .dashboard-container's flex-direction: column, each getting flex: 1 1 0 so they
+   split the remaining vertical space evenly. IDs (#logContainerWrapper,
+   #alertHistoryContainerWrapper, #logs, #alertHistory) remain purely JS hooks. */
+.dashboard-log-panel {
   flex-grow: 1; /* Make this container expand */
   display: flex;
   flex-direction: column;
   min-height: 0; /* Prevent overflow */
   overflow: hidden; /* Contain children */
-  padding-top: 20px; /* Add space above logs label */
+  padding-top: 20px; /* Add space above panel label */
   padding-left: 0; /* Reset padding if needed */
   padding-right: 0;
   padding-bottom: 0;
 }
 
-#logContainerWrapper .log-container {
-  /* occupy exactly the leftover space between table and footer */
+.dashboard-log-panel .log-container {
+  /* occupy exactly the leftover space between neighboring elements */
   flex: 1 1 0;      /* grow, shrink, start at 0 height */
   display: flex;
   min-height: 100px;    /* must be 0 so flexbox may shrink if needed */
   overflow: hidden; /* let the <pre> inside do the scrolling */
 }
 
-/* Make the actual log display fill the container and scroll */
-#logs {
+/* Make the actual log/alert-history display fill the container and scroll */
+.dashboard-log-pre {
   flex: 1 1 0;      /* fill the .log-container but never push it taller */
   min-height: 100px;
   overflow-y: auto; /* vertical scrollbar instead of vertical growth */

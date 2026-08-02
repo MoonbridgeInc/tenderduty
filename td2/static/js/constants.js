@@ -45,14 +45,19 @@ export const API = {
   LOGS_ENABLED: 'logsenabled',
   STATE: 'state',
   LOGS: 'logs',
+  ALERT_HISTORY: 'alert_history',
   WEBSOCKET: 'ws'
 };
 
 // WebSocket message types
 export const WS_MESSAGE_TYPES = {
   LOG: 'log',
-  UPDATE: 'update'
+  UPDATE: 'update',
+  ALERT_HISTORY: 'alert_history'
 };
 
 // Maximum number of log entries to keep
-export const MAX_LOG_ENTRIES = 256; 
+export const MAX_LOG_ENTRIES = 256;
+
+// Maximum number of alert history entries to keep
+export const MAX_ALERT_HISTORY_ENTRIES = 256; 

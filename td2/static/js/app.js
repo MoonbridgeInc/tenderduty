@@ -9,6 +9,7 @@ import { DataService } from './data-service.js';
 import { GridRenderer } from './grid-renderer.js';
 import { TableRenderer } from './table-renderer.js';
 import { LogManager } from './log-manager.js';
+import { AlertHistoryManager } from './alert-history-manager.js';
 import { WebSocketManager } from './websocket-manager.js';
 import { WS_MESSAGE_TYPES } from './constants.js';
 
@@ -20,6 +21,7 @@ class App {
     this.gridRenderer = new GridRenderer();
     this.tableRenderer = new TableRenderer();
     this.logManager = new LogManager();
+    this.alertHistoryManager = new AlertHistoryManager();
     this.wsManager = new WebSocketManager();
     
     // Connect components
@@ -44,6 +46,8 @@ class App {
       
       if (msg.msgType === WS_MESSAGE_TYPES.LOG) {
         this.logManager.addLogMessage(msg.ts, msg.msg);
+      } else if (msg.msgType === WS_MESSAGE_TYPES.ALERT_HISTORY) {
+        this.alertHistoryManager.addEntry(msg);
       } else if (msg.msgType === WS_MESSAGE_TYPES.UPDATE && document.visibilityState !== "hidden") {
         this.tableRenderer.updateTable(msg);
         this.gridRenderer.drawSeries(msg);
@@ -55,6 +59,7 @@ class App {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'hidden') {
         this.logManager._updateLogDisplay();
+        this.alertHistoryManager._updateDisplay();
       }
     });
   }
@@ -79,6 +84,11 @@ class App {
         // Load initial logs if available
         if (state.logs) {
           this.logManager.loadInitialLogs(state.logs);
+        }
+
+        // Load initial alert history if available
+        if (state.alertHistory) {
+          this.alertHistoryManager.loadInitialEntries(state.alertHistory);
         }
       }
       

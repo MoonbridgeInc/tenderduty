@@ -67,7 +67,15 @@ export class DataService {
   }
 
   /**
-   * Load initial state and logs
+   * Fetch alert history
+   * @returns {Promise<Array>} Alert history entries
+   */
+  async fetchAlertHistory() {
+    return await this._fetchData(API.ALERT_HISTORY);
+  }
+
+  /**
+   * Load initial state, logs, and alert history
    * @returns {Promise<Object>} Combined state data
    */
   async loadState() {
@@ -75,16 +83,18 @@ export class DataService {
       // Check if logs are enabled
       const logsStatus = await this.checkLogsEnabled();
       if (logsStatus && logsStatus.enabled === false) {
-        document.getElementById("logContainer").hidden = true;
+        document.getElementById("logContainerWrapper").hidden = true;
+        document.getElementById("alertHistoryContainerWrapper").hidden = true;
       }
 
       // Load state data
       const state = await this.fetchState();
 
-      // Load logs if container is visible
-      if (!document.getElementById("logContainer").hidden) {
+      // Load logs and alert history if the panels are visible
+      if (!document.getElementById("logContainerWrapper").hidden) {
         const logs = await this.fetchLogs();
-        return { ...state, logs };
+        const alertHistory = await this.fetchAlertHistory();
+        return { ...state, logs, alertHistory };
       }
 
       return state;

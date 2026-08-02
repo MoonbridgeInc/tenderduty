@@ -24,9 +24,11 @@ var (
 )
 
 const logLength = 256
+const alertHistoryLength = 256
 
 func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLogs bool, devMode bool,
-	silence func(chain string, minutes int) (time.Time, error), unsilence func(chain string) error) {
+	silence func(chain string, minutes int) (time.Time, error), unsilence func(chain string) error,
+	alertHistory chan AlertHistoryEntry) {
 	var err error
 	rootDir, err = fs.Sub(Content, "static")
 	if err != nil {
@@ -37,10 +39,12 @@ func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLog
 
 	// cache the json .... don't serialize on-demand
 	logCache, statusCache := []byte{'[', ']'}, []byte{'{', '}'}
+	alertHistoryCache := []byte{'[', ']'}
 
 	statusMux := sync.Mutex{}
 	status := make(map[string]*ChainStatus)
 	logSlice := make([]LogMessage, 0)
+	alertHistorySlice := make([]AlertHistoryEntry, 0)
 
 	type statusUpdate struct {
 		MessageType string `json:"msgType"`
@@ -102,6 +106,26 @@ func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLog
 					continue
 				}
 				_ = cast.Send(j)
+
+			case ah := <-alertHistory:
+				if hideLogs {
+					continue
+				}
+				if len(alertHistorySlice) >= alertHistoryLength {
+					alertHistorySlice = append([]AlertHistoryEntry{ah}, alertHistorySlice[0:len(alertHistorySlice)-1]...)
+				} else {
+					alertHistorySlice = append([]AlertHistoryEntry{ah}, alertHistorySlice...)
+				}
+				j, e := json.Marshal(alertHistorySlice)
+				if e != nil {
+					continue
+				}
+				alertHistoryCache = j
+				j, e = json.Marshal(ah)
+				if e != nil {
+					continue
+				}
+				_ = cast.Send(j)
 			}
 		}
 	}()
@@ -137,6 +161,12 @@ func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLog
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
 		_, _ = writer.Write(logCache)
+	})
+
+	http.HandleFunc("/alert_history", func(writer http.ResponseWriter, request *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		writer.Header().Set("Access-Control-Allow-Origin", "*")
+		_, _ = writer.Write(alertHistoryCache)
 	})
 
 	http.HandleFunc("/state", func(writer http.ResponseWriter, request *http.Request) {

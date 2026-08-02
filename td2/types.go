@@ -111,6 +111,7 @@ type Config struct {
 	alertChan           chan *alertMsg // channel used for outgoing notifications
 	updateChan          chan *dash.ChainStatus
 	logChan             chan dash.LogMessage
+	alertHistoryChan    chan dash.AlertHistoryEntry
 	statsChan           chan *promUpdate
 	ctx                 context.Context
 	cancel              context.CancelFunc
@@ -658,6 +659,7 @@ func loadConfig(yamlFile, stateFile, chainConfigDirectory string, password *stri
 
 	c.alertChan = make(chan *alertMsg)
 	c.logChan = make(chan dash.LogMessage)
+	c.alertHistoryChan = make(chan dash.AlertHistoryEntry)
 	// buffer enough to get through validateConfig()
 	c.updateChan = make(chan *dash.ChainStatus, len(c.Chains)*2)
 	c.statsChan = make(chan *promUpdate, len(c.Chains)*2)

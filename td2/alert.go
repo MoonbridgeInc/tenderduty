@@ -16,6 +16,7 @@ import (
 
 	"github.com/PagerDuty/go-pagerduty"
 	github_com_cosmos_cosmos_sdk_types "github.com/cosmos/cosmos-sdk/types"
+	dash "github.com/firstset/tenderduty/v2/td2/dashboard"
 	"github.com/firstset/tenderduty/v2/td2/utils"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -805,6 +806,27 @@ func buildAlertMsg(c *Config, configName, message, severity string, resolved boo
 	return a, cc, true
 }
 
+// recordAlertHistory pushes an entry to the dashboard's alert-history feed, gated
+// exactly like l(...)'s log forwarding (init.go) — only when the dashboard is
+// enabled and logs aren't hidden, so the send never blocks when nothing's
+// listening. Runs regardless of silence status, mirroring alarms.AllAlarms
+// bookkeeping in alert(): history should reflect ground truth — only external
+// dispatch is suppressed by silence mode, not dashboard visibility.
+func recordAlertHistory(c *Config, cc *ChainConfig, message, severity string, resolved bool) {
+	if !c.EnableDash || c.HideLogs || c.alertHistoryChan == nil {
+		return
+	}
+	c.alertHistoryChan <- dash.AlertHistoryEntry{
+		MsgType:  "alert_history",
+		Time:     time.Now().Unix(),
+		Chain:    cc.name,
+		ChainId:  cc.ChainId,
+		Message:  message,
+		Severity: severity,
+		Resolved: resolved,
+	}
+}
+
 func (c *Config) alert(configName, message, severity string, resolved bool, id *string) {
 	if id == nil {
 		return
@@ -819,6 +841,7 @@ func (c *Config) alert(configName, message, severity string, resolved bool, id *
 	} else {
 		c.alertChan <- a
 	}
+	recordAlertHistory(c, cc, message, severity, resolved)
 	alarms.notifyMux.Lock()
 	defer alarms.notifyMux.Unlock()
 	if alarms.AllAlarms[configName] == nil {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	gov "github.com/cosmos/cosmos-sdk/x/gov/types"
+	dash "github.com/firstset/tenderduty/v2/td2/dashboard"
 )
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
@@ -69,6 +70,18 @@ func createTestConfig() *Config {
 	}
 }
 
+// createTestConfigWithHistory returns a createTestConfig()-based config with the
+// dashboard alert-history feed enabled and buffered — kept separate from
+// createTestConfig() so the many existing tests using it are unaffected (an
+// EnableDash-by-default config would make every td.alert() call in every existing
+// test attempt a send on alertHistoryChan, risking a block once the buffer fills).
+func createTestConfigWithHistory() *Config {
+	c := createTestConfig()
+	c.EnableDash = true
+	c.alertHistoryChan = make(chan dash.AlertHistoryEntry, 10)
+	return c
+}
+
 // TestAlertDispatchesCorrectMessage is a regression check for the alert()/buildAlertMsg
 // refactor: alert() must still populate every alertMsg field the same way it did
 // before the extraction, and must still record the alarm (now including Severity) in
@@ -118,6 +131,78 @@ func TestAlertDispatchesCorrectMessage(t *testing.T) {
 	}
 	if entry.Escalated {
 		t.Error("expected a freshly-fired alarm to not be marked Escalated")
+	}
+}
+
+func TestRecordAlertHistoryGating(t *testing.T) {
+	cc := &ChainConfig{name: "test-chain", ChainId: "test-chain-1"}
+
+	tests := []struct {
+		name           string
+		enableDash     bool
+		hideLogs       bool
+		nilChan        bool
+		expectRecorded bool
+	}{
+		{"enabled and not hiding logs records", true, false, false, true},
+		{"dashboard disabled does not record", false, false, false, false},
+		{"logs hidden does not record", true, true, false, false},
+		{"nil channel does not record", true, false, true, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Config{EnableDash: tt.enableDash, HideLogs: tt.hideLogs}
+			if !tt.nilChan {
+				c.alertHistoryChan = make(chan dash.AlertHistoryEntry, 1)
+			}
+
+			recordAlertHistory(c, cc, "something happened", "critical", false)
+
+			select {
+			case entry := <-c.alertHistoryChan:
+				if !tt.expectRecorded {
+					t.Fatalf("expected no history entry, got %+v", entry)
+				}
+				if entry.Chain != "test-chain" || entry.ChainId != "test-chain-1" || entry.Message != "something happened" || entry.Severity != "critical" || entry.Resolved {
+					t.Errorf("unexpected entry fields: %+v", entry)
+				}
+			default:
+				if tt.expectRecorded {
+					t.Fatal("expected a history entry, got none")
+				}
+			}
+		})
+	}
+}
+
+func TestAlertRecordsHistoryEvenWhenSilenced(t *testing.T) {
+	originalTd, originalAlarms := td, alarms
+	td = createTestConfigWithHistory()
+	alarms = &alarmCache{
+		AllAlarms: make(map[string]map[string]alertMsgCache),
+		notifyMux: sync.RWMutex{},
+	}
+	defer func() { td, alarms = originalTd, originalAlarms }()
+
+	td.Chains["test-chain"].silencedUntil.Store(time.Now().Add(10 * time.Minute).Unix())
+
+	id := "TestAlert_silenced_history"
+	td.alert("test-chain", "node down during maintenance", "critical", false, &id)
+
+	select {
+	case <-td.alertChan:
+		t.Fatal("expected dispatch to be suppressed while the chain is silenced")
+	default:
+	}
+
+	select {
+	case entry := <-td.alertHistoryChan:
+		if entry.Message != "node down during maintenance" {
+			t.Errorf("unexpected history message: %q", entry.Message)
+		}
+	default:
+		t.Fatal("expected a history entry even though the chain is silenced")
 	}
 }
 

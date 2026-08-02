@@ -123,10 +123,19 @@
         </div>
 
         <!-- Collapsible Logs Section -->
-        <div id="logContainerWrapper">
+        <div class="dashboard-log-panel" id="logContainerWrapper">
+          <div class="uk-text-small uk-text-muted log-toggle-label">Logs</div>
           <div class="log-container">
             <!-- Remove inline style, CSS will handle styling based on theme -->
-            <pre id="logs" class="logs-box"></pre>
+            <pre id="logs" class="logs-box dashboard-log-pre"></pre>
+          </div>
+        </div>
+
+        <!-- Alert History Section -->
+        <div class="dashboard-log-panel" id="alertHistoryContainerWrapper">
+          <div class="uk-text-small uk-text-muted log-toggle-label">Alert History</div>
+          <div class="log-container">
+            <pre id="alertHistory" class="logs-box dashboard-log-pre"></pre>
           </div>
         </div>
       </div>

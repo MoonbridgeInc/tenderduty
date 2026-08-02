@@ -81,6 +81,7 @@ func checkEscalations(threshold time.Duration) {
 		alarms.AllAlarms[cand.chain][cand.alertID] = entry
 		alarms.notifyMux.Unlock()
 
+		recordAlertHistory(td, cc, msg.message, msg.severity, msg.resolved)
 		td.alertChan <- msg
 	}
 }

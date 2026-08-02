@@ -1,9 +1,12 @@
 package tenderduty
 
 import (
+	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	dash "github.com/firstset/tenderduty/v2/td2/dashboard"
 )
 
 func newEscalationTestConfig() *Config {
@@ -211,5 +214,39 @@ func TestCheckEscalationsUnknownChain(t *testing.T) {
 	case msg := <-td.alertChan:
 		t.Fatalf("expected no escalation for a chain no longer in td.Chains, got %+v", msg)
 	default:
+	}
+}
+
+func TestCheckEscalationsRecordsHistory(t *testing.T) {
+	originalTd, originalAlarms := td, alarms
+	td = newEscalationTestConfig()
+	td.EnableDash = true
+	td.alertHistoryChan = make(chan dash.AlertHistoryEntry, 10)
+	alarms = newEscalationTestAlarms()
+	defer func() { td, alarms = originalTd, originalAlarms }()
+
+	alarms.AllAlarms["test-chain"] = map[string]alertMsgCache{
+		"SomeAlert_testval123": {
+			Message:  "node is down",
+			SentTime: time.Now().Add(-5 * time.Minute),
+			Severity: "critical",
+		},
+	}
+
+	checkEscalations(1 * time.Minute)
+
+	select {
+	case entry := <-td.alertHistoryChan:
+		if !strings.HasPrefix(entry.Message, "🔺 ESCALATION:") {
+			t.Errorf("expected an escalation-prefixed history message, got %q", entry.Message)
+		}
+		if entry.Resolved {
+			t.Error("expected the escalation history entry to be a firing (not resolved) event")
+		}
+		if entry.Severity != "critical" {
+			t.Errorf("expected severity critical, got %q", entry.Severity)
+		}
+	default:
+		t.Fatal("expected an alert-history entry for the escalation")
 	}
 }
