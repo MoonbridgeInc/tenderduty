@@ -32,7 +32,14 @@ export class TableRenderer {
     let statusText = "";
     let toggleAttribute = "";
     let modalHtml = "";
-    const modalId = `modal-center-${_.escape(status.name)}`;
+    // modalId is used both as an id="" attribute and inside a CSS id selector
+    // (uk-toggle="target: #...") -- _.escape() HTML-entity-escapes for safe
+    // display text, which doesn't help here (an unescaped space, "&", etc. in
+    // a CSS selector breaks it, e.g. a chain named "Cosmos Hub" would produce
+    // "#modal-center-Cosmos Hub", parsed as a descendant selector and matching
+    // nothing). Strip to characters that are always safe as a bare CSS
+    // identifier instead.
+    const modalId = `modal-center-${status.name.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 
     // Create modal first if there is a last_error
     if (status.last_error !== "") {

@@ -239,8 +239,16 @@ type CacheHandler struct {
 }
 
 func (ch CacheHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	writer.Header().Set("Cache-Control", "public, max-age=3600")
-	writer.Header().Set("X-Powered-By", "https://github.com/firstset/tenderduty")
+	if ch.devMode {
+		// devMode serves straight off disk specifically so edits show up live;
+		// a long-lived cache would defeat that, forcing a hard-refresh after
+		// every change. Browsers still get to skip the body via a 304 when the
+		// file's mtime/ETag (set by http.FileServer) hasn't changed.
+		writer.Header().Set("Cache-Control", "no-cache")
+	} else {
+		writer.Header().Set("Cache-Control", "public, max-age=3600")
+	}
+	writer.Header().Set("X-Powered-By", "https://github.com/MoonbridgeInc/tenderduty")
 	if ch.devMode {
 		http.FileServer(http.Dir("./td2/static")).ServeHTTP(writer, request)
 	} else {

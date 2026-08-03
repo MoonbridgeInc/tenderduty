@@ -1,67 +1,32 @@
-/* Grid Visualization Styles */
+/* Grid Visualization Styles
+   Surface/ink tokens (--surface-*, --text-*, --status-*) come from
+   custom-styles.css, which loads after this file and owns the palette. */
+
 :root {
-  /* Light theme colors */
-  --light-text-color: #555;
-  --light-background: #ffffff;
-  --light-log-background: #dddddd;
-  --light-log-text-color: #0a0a0a;
-  
-  /* Dark theme colors */
-  --dark-text-color: #b0b0b0;
-  --dark-background: #222222;
-  --dark-log-background: #080808;
-  --dark-log-text-color: #b0b0b0; /* Same as general dark text */
-  
-  /* Block status colors - Inspired by GitHub/Linear */
-  --color-signed: #d6f5d6; /* Pale Green */
-  --color-proposed: #40c463; /* Leafy Green */
-  --color-empty-proposed: #9be9a8; /* Medium Pale Green */
-  
-  --color-miss-prevote: #FFDB58; /* Mustard Yellow */
-  --color-miss-precommit: #FFA500; /* Orange */
-  --color-missed: #d73a49; /* GitHub-like error red */
-  
-  /* Separate No Data colors for themes */
-  --color-no-data-light: #ebedf0; /* GitHub light no-data */
-  --color-no-data-dark: #30363d;  /* GitHub dark no-data */
-  
+  /* Block status colors — severity gradient within the green "good" family for
+     the common cases (signed/proposed/empty), then warning -> serious -> critical
+     for the miss states. Status hexes match the dataviz status palette; the
+     signed/proposed/empty tones are tints so the rare, meaningful events (misses)
+     are what pop across a grid of mostly-good cells. */
+  --block-signed: #bfe6bb;
+  --block-proposed: #0ca30c;
+  --block-empty-proposed: #1baf7a;
+  --block-miss-prevote: #fab219;
+  --block-miss-precommit: #ec835a;
+  --block-missed: #d03b3b;
+  --block-no-data: #e1e0d9;
+
   /* Grid dimensions - square blocks */
   --cell-height: 12px;
   --cell-width: 6px;
   --chain-label-width: 150px;
-  --block-margin: 2px;
-  --block-border-radius: 1px;
+  --block-margin: 1px;
+  --block-border-radius: 2px;
 }
 
-/* Theme-specific variables */
 body.uk-light {
-  --text-color: var(--dark-text-color);
-  --background: var(--dark-background);
-  --log-background: var(--dark-log-background);
-  --log-text-color: var(--dark-log-text-color);
-  --color-no-data: var(--color-no-data-dark); /* Use dark no-data */
-  --color-signed: rgba(64, 196, 99, 0.3); /* Low opacity green for dark mode */
-}
-
-body.uk-text-default {
-  --text-color: var(--light-text-color);
-  --background: var(--light-background);
-  --log-background: var(--light-log-background);
-  --log-text-color: var(--light-log-text-color);
-  --color-no-data: var(--color-no-data-light); /* Use light no-data */
-}
-
-/* Apply base background and text color */
-body {
-  background-color: var(--background);
-  color: var(--text-color);
-}
-
-/* Ensure containers also use the background */
-div#canvasDiv,
-div#tableDiv,
-div#legend-container {
-    background-color: var(--background);
+  --block-signed: rgba(12, 163, 12, 0.32);
+  --block-no-data: #2c2c2a;
 }
 
 /* Grid Container */
@@ -74,15 +39,14 @@ div#legend-container {
 
 #grid-container {
   min-width: 100%;
-  padding: 10px 0;
+  padding: 4px 0;
   overflow: visible; /* Allow tooltips to overflow */
 }
 
-/* Remove inline legend-container overflow constraints */
 .grid-visualization-container #legend-container {
   position: sticky;
   top: 0;
-  background: var(--background);
+  background: var(--surface-card);
   z-index: 20;
 }
 
@@ -98,8 +62,9 @@ div#legend-container {
   flex-shrink: 0; /* Prevent shrinking */
   width: max-content; /* Size based on text */
   max-width: 200px;   /* Limit width */
-  font-size: 14px; /* Slightly smaller */
-  color: var(--text-color);
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden; /* Required for ellipsis */
   text-overflow: ellipsis;
@@ -121,60 +86,45 @@ div#legend-container {
   position: relative;
   margin: var(--block-margin);
   border-radius: var(--block-border-radius);
-  box-sizing: border-box; 
+  box-sizing: border-box;
   transition: transform 0.1s ease-in-out; /* For hover effect */
   z-index: 1; /* Lower z-index */
-  /* Remove outline properties */
 }
 
 /* Subtle hover effect */
 .block:hover {
-  transform: scale(1.2);
+  transform: scale(1.3);
   z-index: 2;
 }
 
 /* Block status styles (matching BLOCK_STATUS constants) */
-/* PROPOSED (4) */
 .block.status-proposed {
-  background: var(--color-proposed);
+  background: var(--block-proposed);
 }
 
-/* EMPTY_PROPOSED (5) */
 .block.status-empty-proposed {
-  background: var(--color-empty-proposed);
+  background: var(--block-empty-proposed);
 }
 
-/* SIGNED (3) - Use single color, maybe differentiate odd/even later if needed */
 .block.status-signed {
-  background: var(--color-signed);
+  background: var(--block-signed);
 }
-/* Remove odd/even specific rules */
 
-/* PRECOMMIT_MISSED (2) */
 .block.status-miss-precommit {
-  background: var(--color-miss-precommit);
+  background: var(--block-miss-precommit);
 }
 
-/* PREVOTE_MISSED (1) */
 .block.status-miss-prevote {
-  background: var(--color-miss-prevote);
+  background: var(--block-miss-prevote);
 }
 
-/* MISSED (0) */
 .block.status-missed {
-  background: var(--color-missed);
+  background: var(--block-missed);
 }
 
-/* NO_DATA (-1) */
 .block.status-no-data {
-  background: var(--color-no-data); /* Uses theme-specific variable */
+  background: var(--block-no-data);
 }
-
-/* Line indicator for missed blocks - Remove or adapt? Let's remove for now. */
-/* .block .block-line { ... } */
-
-/* Line between blocks - Remove, using margin now */
-/* .block:not(:first-child)::before { ... } */
 
 /* Animation for height changes */
 .block-height-change {
@@ -219,32 +169,31 @@ div#legend-container {
 
 /* Apply status colors to legend blocks */
 .legend-block.status-proposed {
-  background: var(--color-proposed);
+  background: var(--block-proposed);
 }
 
 .legend-block.status-empty-proposed {
-  background: var(--color-empty-proposed);
+  background: var(--block-empty-proposed);
 }
 
-/* Signed Legend - Use base signed color */
 .legend-block.status-signed {
-  background: var(--color-signed);
+  background: var(--block-signed);
 }
 
 .legend-block.status-miss-precommit {
-  background: var(--color-miss-precommit);
+  background: var(--block-miss-precommit);
 }
 
 .legend-block.status-miss-prevote {
-  background: var(--color-miss-prevote);
+  background: var(--block-miss-prevote);
 }
 
 .legend-block.status-missed {
-  background: var(--color-missed);
+  background: var(--block-missed);
 }
 
 .legend-block.status-no-data {
-  background: var(--color-no-data);
+  background: var(--block-no-data);
 }
 
 /* Responsive adjustments */
@@ -252,9 +201,4 @@ div#legend-container {
   .grid-visualization-container {
     overflow-x: scroll; /* Enable horizontal scrolling on smaller screens */
   }
-}
-
-/* Ensure grid container allows overflow for tooltips if needed */
-.grid-visualization-container {
-  overflow: visible; /* Or adjust padding */
 }
