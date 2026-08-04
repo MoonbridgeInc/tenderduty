@@ -1352,7 +1352,7 @@ func evaluateUnclaimedRewardsAlert(cc *ChainConfig) (bool, bool) {
 			return alert, resolved
 		}
 
-		coinPrice, err := td.coinMarketCapClient.GetPrice(td.ctx, cc.Slug)
+		coinPrice, err := td.priceConverter.GetPrice(td.ctx, cc.Slug)
 		if err == nil && convertedToDisplay {
 			totalRewardsConverted := totalAmount.MustFloat64() * coinPrice.Price
 			threshold := floatVal(cc.Alerts.UnclaimedRewardsThreshold)

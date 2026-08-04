@@ -29,11 +29,18 @@ prometheus_enabled: yes
 # What port should it listen on? For now only port is configurable.
 prometheus_listen_port: 28686
 
-# CoinMarketCap API key for price conversions
+# CoinMarketCap API key for price conversions (used when convert_to_fiat.provider is "coinmarketcap", the default)
 coin_market_cap_api_token: xxxxxx
+# CoinGecko API key for price conversions (used when convert_to_fiat.provider is "coingecko")
+# Optional: CoinGecko's /simple/price endpoint works without a key too, just at a lower rate limit.
+# Get a free Demo key at https://www.coingecko.com/en/api/pricing
+coin_gecko_api_token: xxxxxx
 # When enabled, the cryptos will be converted into a fiat currency based on its latest price
 convert_to_fiat:
   enabled: true
+  # Which price API to use: "coinmarketcap" (default) or "coingecko". Useful if a chain
+  # you're monitoring isn't listed on CoinMarketCap but is listed on CoinGecko (or vice versa).
+  provider: coinmarketcap
   currency: USD # or EUR, SEK, etc.
   cache_expiration: 8 # cache the pricing data for 8 hours
 
@@ -144,7 +151,8 @@ default_alert_config:
   stake_change_increase_threshold: 0.05 # meaning 5%
 
   # Alert when a validator has more than the threhold value of unclaimed rewards
-  # The threshold is defined with a fiat currency unit like USD, so this feature requires properly configuring coin_market_cap_api_token and enabling convert_to_fiat
+  # The threshold is defined with a fiat currency unit like USD, so this feature requires properly
+  # configuring convert_to_fiat and the API token for whichever provider is selected (coin_market_cap_api_token or coin_gecko_api_token)
   unclaimed_rewards_alerts: yes
   unclaimed_rewards_threshold_in_fiat_currency: 10000
 
@@ -175,7 +183,8 @@ chains:
     # Should the monitor revert to using public API endpoints if all supplied RCP nodes fail?
     # This isn't always reliable, not all public nodes have websocket proxying setup correctly.
     public_fallback: no
-    # the name/slug of this chain, used by CoinMarketCap API to convert the price
+    # the name/id of this chain, used by whichever provider convert_to_fiat.provider selects
+    # (CoinMarketCap's slug or CoinGecko's id — usually but not always the same string)
     slug: osmosis
 
     # The chain name as it appears on cosmos.directory (e.g., "osmosis", "babylon", "cosmoshub")

@@ -140,7 +140,7 @@ func (cc *ChainConfig) GetValInfo(first bool) (err error) {
 	cc.valInfo.DelegatedTokens = delegatedTokens
 	cc.valInfo.CommissionRate = commissionRate
 	if td.PriceConversion.Enabled {
-		cryptoPrice, err := td.coinMarketCapClient.GetPrice(ctx, cc.Slug)
+		cryptoPrice, err := td.priceConverter.GetPrice(ctx, cc.Slug)
 		if err == nil {
 			cc.cryptoPrice = cryptoPrice
 		}

@@ -116,7 +116,7 @@ type Config struct {
 	ctx                 context.Context
 	cancel              context.CancelFunc
 	alarms              *alarmCache
-	coinMarketCapClient *utils.CoinMarketCapClient
+	priceConverter      utils.PriceConverter
 	tenderdutyCache     *utils.TenderdutyCache // used for caching different kinds of data in memory, such as bank metadata quried from our GitHub repo
 
 	// EnableDash enables the web dashboard
@@ -166,6 +166,7 @@ type Config struct {
 	GovernanceAlertsReminderInterval int `yaml:"governance_alerts_reminder_interval"`
 
 	CoinMarketCapAPIToken string                `yaml:"coin_market_cap_api_token"`
+	CoinGeckoAPIToken     string                `yaml:"coin_gecko_api_token"`
 	PriceConversion       PriceConversionConfig `yaml:"convert_to_fiat"`
 
 	chainsMux sync.RWMutex // prevents concurrent map access for Chains
@@ -465,9 +466,29 @@ type HealthcheckConfig struct {
 }
 
 type PriceConversionConfig struct {
-	Enabled         bool   `yaml:"enabled"`
+	Enabled bool `yaml:"enabled"`
+	// Provider selects which fiat-price API to use: "coinmarketcap" (default, for
+	// backward compatibility with configs that predate this field) or "coingecko".
+	Provider        string `yaml:"provider"`
 	Currency        string `yaml:"currency"`
 	CacheExpiration int    `yaml:"cache_expiration"`
+}
+
+const (
+	priceProviderCoinMarketCap = "coinmarketcap"
+	priceProviderCoinGecko     = "coingecko"
+)
+
+// normalizePriceProvider resolves a possibly-empty/unrecognized convert_to_fiat.provider
+// value to one of the two supported provider identifiers, defaulting to CoinMarketCap.
+// Called both from loadConfig (before the price client is constructed) and from
+// validateConfig (for canonicalization), because loadConfig's client construction runs
+// before validateConfig (see run.go).
+func normalizePriceProvider(provider string) string {
+	if strings.ToLower(strings.TrimSpace(provider)) == priceProviderCoinGecko {
+		return priceProviderCoinGecko
+	}
+	return priceProviderCoinMarketCap
 }
 
 // validateConfig is a non-exhaustive check for common problems with the configuration. Needs love.
@@ -499,6 +520,11 @@ func validateConfig(c *Config) (fatal bool, problems []string) {
 	if c.GovernanceAlertsReminderInterval <= 0 {
 		c.GovernanceAlertsReminderInterval = 6
 	}
+
+	// when unset or unrecognized, default to coinmarketcap for backward compatibility
+	// with configs that predate the provider switch (same silent-default precedent as
+	// GovernanceAlertsReminderInterval above).
+	c.PriceConversion.Provider = normalizePriceProvider(c.PriceConversion.Provider)
 
 	var wantsPublic bool
 	for k, v := range c.Chains {
@@ -790,8 +816,12 @@ func loadConfig(yamlFile, stateFile, chainConfigDirectory string, password *stri
 	}
 
 	c.tenderdutyCache = utils.NewCache()
-	// init a CoinMarketCap client if needed
+	// init a fiat price-conversion client if needed, using whichever provider is configured.
+	// Provider is normalized here (not only in validateConfig) because this client is
+	// constructed during loadConfig, which runs before validateConfig (see run.go).
 	if c.PriceConversion.Enabled {
+		c.PriceConversion.Provider = normalizePriceProvider(c.PriceConversion.Provider)
+
 		// Use ternary-like operation for currency selection
 		currency := "USD"
 		cacheExpiration := 8
@@ -810,10 +840,16 @@ func loadConfig(yamlFile, stateFile, chainConfigDirectory string, password *stri
 			}
 		}
 
-		c.coinMarketCapClient = utils.NewCoinMarketCapClient(c.CoinMarketCapAPIToken, currency, c.tenderdutyCache, cacheExpiration, slugs)
-		_, err := c.coinMarketCapClient.GetPrices(c.ctx)
+		switch c.PriceConversion.Provider {
+		case priceProviderCoinGecko:
+			c.priceConverter = utils.NewCoinGeckoClient(c.CoinGeckoAPIToken, currency, c.tenderdutyCache, cacheExpiration, slugs)
+		default:
+			c.priceConverter = utils.NewCoinMarketCapClient(c.CoinMarketCapAPIToken, currency, c.tenderdutyCache, cacheExpiration, slugs)
+		}
+
+		_, err := c.priceConverter.GetPrices(c.ctx)
 		if err == nil {
-			l(slog.LevelInfo, "💸 price conversion enabled")
+			l(slog.LevelInfo, fmt.Sprintf("💸 price conversion enabled (provider: %s)", c.PriceConversion.Provider))
 		} else {
 			c.PriceConversion.Enabled = false
 			l(slog.LevelWarn, "🛑 failed to enable price conversion, found error:", err)

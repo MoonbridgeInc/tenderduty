@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	github_com_cosmos_cosmos_sdk_types "github.com/cosmos/cosmos-sdk/types"
@@ -15,7 +16,7 @@ import (
 const (
 	defaultCoinmarketcapApiEndpoint = "https://pro-api.coinmarketcap.com"
 	defaultRequestTimeout           = 10 * time.Second
-	cacheKey                        = "crypto_price"
+	cmcCacheKey                     = "crypto_price_coinmarketcap"
 )
 
 // CryptoPrice represents price data for a cryptocurrency
@@ -26,6 +27,17 @@ type CryptoPrice struct {
 	Currency    string    `json:"currency"`
 	Price       float64   `json:"price"`
 	LastUpdated time.Time `json:"last_updated"`
+}
+
+// PriceConverter is implemented by every fiat-price-conversion backend (CoinMarketCap,
+// CoinGecko, ...). Callers depend on this interface rather than a concrete client type
+// so the configured provider can be swapped without touching call sites.
+type PriceConverter interface {
+	// GetPrices returns the latest known price for every slug/id the client was
+	// configured with, using the cache when a fresh-enough entry is available.
+	GetPrices(ctx context.Context) (map[string]CryptoPrice, error)
+	// GetPrice returns the latest known price for a single slug/id.
+	GetPrice(ctx context.Context, slug string) (*CryptoPrice, error)
 }
 
 // CMCResponse represents the structure of the CoinMarketCap API response
@@ -57,6 +69,8 @@ type CoinMarketCapClient struct {
 	httpClient      *http.Client
 	cacheClient     *TenderdutyCache
 }
+
+var _ PriceConverter = (*CoinMarketCapClient)(nil)
 
 // NewCoinMarketCapClient creates a new client with the provided API key
 func NewCoinMarketCapClient(apiKey string, currency string, cacheClient *TenderdutyCache, cacheExpiration int, slugs []string) *CoinMarketCapClient {
@@ -92,7 +106,7 @@ func WithTimeout(timeout time.Duration) func(*CoinMarketCapClient) {
 // GetPrices fetches cryptocurrency prices, using cache when available
 func (c *CoinMarketCapClient) GetPrices(ctx context.Context) (map[string]CryptoPrice, error) {
 	// try to find the data from cache first
-	cache, ok1 := c.cacheClient.Get(cacheKey)
+	cache, ok1 := c.cacheClient.Get(cmcCacheKey)
 	prices, ok2 := cache.(map[string]CryptoPrice)
 
 	if !ok1 || !ok2 {
@@ -103,7 +117,7 @@ func (c *CoinMarketCapClient) GetPrices(ctx context.Context) (map[string]CryptoP
 			return nil, err
 		}
 		// Update cache
-		c.cacheClient.Set(cacheKey, prices, time.Duration(c.cacheExpiration)*time.Hour)
+		c.cacheClient.Set(cmcCacheKey, prices, time.Duration(c.cacheExpiration)*time.Hour)
 	}
 
 	return prices, nil
@@ -118,7 +132,7 @@ func (c *CoinMarketCapClient) GetPrice(ctx context.Context, slug string) (*Crypt
 
 	if prices != nil {
 		// Check if the slug exists in the freshly fetched data
-		if price, exists := prices[slug]; exists {
+		if price, exists := prices[strings.ToLower(slug)]; exists {
 			return &price, nil
 		}
 	}
