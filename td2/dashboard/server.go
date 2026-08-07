@@ -26,115 +26,153 @@ var (
 const logLength = 256
 const alertHistoryLength = 256
 
-func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLogs bool, devMode bool,
-	silence func(chain string, minutes int) (time.Time, error), unsilence func(chain string) error,
-	alertHistory chan AlertHistoryEntry) {
-	var err error
-	rootDir, err = fs.Sub(Content, "static")
-	if err != nil {
-		slog.Error("failed to load embedded static content", "err", err)
-		os.Exit(1)
+// statusUpdate is the wire shape broadcast/served for the aggregated chain status.
+type statusUpdate struct {
+	MessageType string `json:"msgType"`
+	Status      []*ChainStatus
+}
+
+// dashCache holds all dashboard state written by the single background aggregator
+// goroutine in Serve and read concurrently by HTTP handlers. All access goes through
+// mu. Previously the status map was guarded by a mutex but the three []byte caches
+// derived from it were written and read with no synchronization at all — a real data
+// race between the writer goroutine and per-request handler goroutines.
+type dashCache struct {
+	mu sync.RWMutex
+
+	status            map[string]*ChainStatus
+	logSlice          []LogMessage
+	alertHistorySlice []AlertHistoryEntry
+
+	logCache          []byte
+	statusCache       []byte
+	alertHistoryCache []byte
+}
+
+func newDashCache() *dashCache {
+	return &dashCache{
+		status:            make(map[string]*ChainStatus),
+		logSlice:          make([]LogMessage, 0),
+		alertHistorySlice: make([]AlertHistoryEntry, 0),
+		logCache:          []byte{'[', ']'},
+		statusCache:       []byte{'{', '}'},
+		alertHistoryCache: []byte{'[', ']'},
 	}
-	var cast broadcast.Broadcaster
+}
 
-	// cache the json .... don't serialize on-demand
-	logCache, statusCache := []byte{'[', ']'}, []byte{'{', '}'}
-	alertHistoryCache := []byte{'[', ']'}
-
-	statusMux := sync.Mutex{}
-	status := make(map[string]*ChainStatus)
-	logSlice := make([]LogMessage, 0)
-	alertHistorySlice := make([]AlertHistoryEntry, 0)
-
-	type statusUpdate struct {
-		MessageType string `json:"msgType"`
-		Status      []*ChainStatus
+// updateStatus applies an incoming chain-status update: redacts leaked RPC endpoints
+// from LastError in place when hideLogs is set, merges into status, marshals, and
+// caches the result. Returns nil on marshal error, the marshaled bytes otherwise.
+func (c *dashCache) updateStatus(u *ChainStatus, hideLogs bool) []byte {
+	// try to catch any accidental rpc endpoint leaks
+	if hideLogs && rex.MatchString(u.LastError) {
+		u.LastError = rex.ReplaceAllString(u.LastError, "-redacted-")
 	}
 
-	go func() {
-		tick := time.NewTicker(time.Second)
-		update := false
-		for {
-			select {
-			case <-tick.C:
-				if update {
-					_ = cast.Send(statusCache)
-					update = false
-				}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.status[u.Name] = u
+	result := make([]*ChainStatus, 0, len(c.status))
+	for k := range c.status {
+		result = append(result, c.status[k])
+	}
+	sort.Slice(result, func(i, j int) bool {
+		return sort.StringsAreSorted([]string{result[i].Name, result[j].Name})
+	})
+	j, e := json.Marshal(statusUpdate{
+		MessageType: "update",
+		Status:      result,
+	})
+	if e != nil {
+		return nil
+	}
+	c.statusCache = j
+	return j
+}
 
-			case u := <-updates:
-				// try to catch any accidental rpc endpoint leaks
-				if hideLogs && rex.MatchString(u.LastError) {
-					u.LastError = rex.ReplaceAllString(u.LastError, "-redacted-")
-				}
-				statusMux.Lock() // probably unnecessary
-				status[u.Name] = u
-				result := make([]*ChainStatus, 0)
-				for k := range status {
-					result = append(result, status[k])
-				}
-				statusMux.Unlock()
-				sort.Slice(result, func(i, j int) bool {
-					return sort.StringsAreSorted([]string{result[i].Name, result[j].Name})
-				})
-				j, e := json.Marshal(statusUpdate{
-					MessageType: "update",
-					Status:      result,
-				})
-				if e != nil {
-					continue
-				}
-				statusCache = j
-				update = true
+// appendLog appends a log message to the capped ring buffer. Returns (nil, nil) when
+// hideLogs is set — the message is dropped entirely, not redacted (redaction only ever
+// applies to ChainStatus.LastError). Returns the updated cache and the marshaled single
+// entry (for the caller to broadcast).
+func (c *dashCache) appendLog(l LogMessage, hideLogs bool) (cache []byte, single []byte) {
+	if hideLogs {
+		return nil, nil
+	}
 
-			case l := <-logs:
-				if hideLogs {
-					continue
-				}
-				if len(logSlice) >= logLength {
-					logSlice = append([]LogMessage{l}, logSlice[0:len(logSlice)-1]...)
-				} else {
-					logSlice = append([]LogMessage{l}, logSlice...)
-				}
-				j, e := json.Marshal(logSlice)
-				if e != nil {
-					continue
-				}
-				logCache = j
-				j, e = json.Marshal(l)
-				if e != nil {
-					continue
-				}
-				_ = cast.Send(j)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.logSlice) >= logLength {
+		c.logSlice = append([]LogMessage{l}, c.logSlice[0:len(c.logSlice)-1]...)
+	} else {
+		c.logSlice = append([]LogMessage{l}, c.logSlice...)
+	}
+	j, e := json.Marshal(c.logSlice)
+	if e != nil {
+		return nil, nil
+	}
+	c.logCache = j
+	single, e = json.Marshal(l)
+	if e != nil {
+		return j, nil
+	}
+	return j, single
+}
 
-			case ah := <-alertHistory:
-				if hideLogs {
-					continue
-				}
-				if len(alertHistorySlice) >= alertHistoryLength {
-					alertHistorySlice = append([]AlertHistoryEntry{ah}, alertHistorySlice[0:len(alertHistorySlice)-1]...)
-				} else {
-					alertHistorySlice = append([]AlertHistoryEntry{ah}, alertHistorySlice...)
-				}
-				j, e := json.Marshal(alertHistorySlice)
-				if e != nil {
-					continue
-				}
-				alertHistoryCache = j
-				j, e = json.Marshal(ah)
-				if e != nil {
-					continue
-				}
-				_ = cast.Send(j)
-			}
-		}
-	}()
+// appendAlertHistory: identical shape to appendLog, for alert-history entries.
+func (c *dashCache) appendAlertHistory(ah AlertHistoryEntry, hideLogs bool) (cache []byte, single []byte) {
+	if hideLogs {
+		return nil, nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.alertHistorySlice) >= alertHistoryLength {
+		c.alertHistorySlice = append([]AlertHistoryEntry{ah}, c.alertHistorySlice[0:len(c.alertHistorySlice)-1]...)
+	} else {
+		c.alertHistorySlice = append([]AlertHistoryEntry{ah}, c.alertHistorySlice...)
+	}
+	j, e := json.Marshal(c.alertHistorySlice)
+	if e != nil {
+		return nil, nil
+	}
+	c.alertHistoryCache = j
+	single, e = json.Marshal(ah)
+	if e != nil {
+		return j, nil
+	}
+	return j, single
+}
+
+func (c *dashCache) getLogCache() []byte {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.logCache
+}
+
+func (c *dashCache) getStatusCache() []byte {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.statusCache
+}
+
+func (c *dashCache) getAlertHistoryCache() []byte {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.alertHistoryCache
+}
+
+// newMux builds the dashboard's routes on a private *http.ServeMux — never the
+// package-level http.DefaultServeMux — so it can be constructed independently of
+// ListenAndServe (e.g. by tests) and any number of times in one process.
+func newMux(dc *dashCache, hideLogs, devMode bool, cast *broadcast.Broadcaster,
+	silence func(chain string, minutes int) (time.Time, error), unsilence func(chain string) error) *http.ServeMux {
+	mux := http.NewServeMux()
 
 	upgrader := websocket.Upgrader{}
 	upgrader.CheckOrigin = func(r *http.Request) bool { return true }
 	upgrader.EnableCompression = true
 
-	http.HandleFunc("/ws", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/ws", func(writer http.ResponseWriter, request *http.Request) {
 		c, err := upgrader.Upgrade(writer, request, nil)
 		if err != nil {
 			return
@@ -150,32 +188,32 @@ func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLog
 		}
 	})
 
-	http.HandleFunc("/logsenabled", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/logsenabled", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
 		j, _ := json.Marshal(map[string]bool{"enabled": !hideLogs})
 		_, _ = writer.Write(j)
 	})
 
-	http.HandleFunc("/logs", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/logs", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
-		_, _ = writer.Write(logCache)
+		_, _ = writer.Write(dc.getLogCache())
 	})
 
-	http.HandleFunc("/alert_history", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/alert_history", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
-		_, _ = writer.Write(alertHistoryCache)
+		_, _ = writer.Write(dc.getAlertHistoryCache())
 	})
 
-	http.HandleFunc("/state", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/state", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
-		_, _ = writer.Write(statusCache)
+		_, _ = writer.Write(dc.getStatusCache())
 	})
 
-	http.HandleFunc("/silence", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/silence", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
 		if request.Method != http.MethodPost {
@@ -199,7 +237,7 @@ func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLog
 		_, _ = writer.Write(j)
 	})
 
-	http.HandleFunc("/unsilence", func(writer http.ResponseWriter, request *http.Request) {
+	mux.HandleFunc("/unsilence", func(writer http.ResponseWriter, request *http.Request) {
 		writer.Header().Set("Content-Type", "application/json")
 		writer.Header().Set("Access-Control-Allow-Origin", "*")
 		if request.Method != http.MethodPost {
@@ -220,11 +258,62 @@ func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLog
 		_, _ = writer.Write([]byte(`{"ok":true}`))
 	})
 
-	http.Handle("/", &CacheHandler{
+	mux.Handle("/", &CacheHandler{
 		devMode: devMode,
 	})
+
+	return mux
+}
+
+func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLogs bool, devMode bool,
+	silence func(chain string, minutes int) (time.Time, error), unsilence func(chain string) error,
+	alertHistory chan AlertHistoryEntry) {
+	var err error
+	rootDir, err = fs.Sub(Content, "static")
+	if err != nil {
+		slog.Error("failed to load embedded static content", "err", err)
+		os.Exit(1)
+	}
+
+	dc := newDashCache()
+	// was `var cast broadcast.Broadcaster`; now a pointer purely so newMux can share
+	// the same instance — every Broadcaster method already has a pointer receiver, so
+	// this is behaviorally identical to the zero-value form.
+	cast := &broadcast.Broadcaster{}
+
+	go func() {
+		tick := time.NewTicker(time.Second)
+		update := false
+		for {
+			select {
+			case <-tick.C:
+				if update {
+					_ = cast.Send(dc.getStatusCache())
+					update = false
+				}
+
+			case u := <-updates:
+				if dc.updateStatus(u, hideLogs) != nil {
+					update = true
+				}
+
+			case l := <-logs:
+				if _, single := dc.appendLog(l, hideLogs); single != nil {
+					_ = cast.Send(single)
+				}
+
+			case ah := <-alertHistory:
+				if _, single := dc.appendAlertHistory(ah, hideLogs); single != nil {
+					_ = cast.Send(single)
+				}
+			}
+		}
+	}()
+
+	mux := newMux(dc, hideLogs, devMode, cast, silence, unsilence)
 	server := &http.Server{
 		Addr:              ":" + port,
+		Handler:           mux,
 		ReadHeaderTimeout: 3 * time.Second,
 	}
 	err = server.ListenAndServe()
