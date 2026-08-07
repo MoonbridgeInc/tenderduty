@@ -42,7 +42,7 @@ The application has been refactored to use modern JavaScript ES modules, with a 
 │   ├── table-renderer.js # Table rendering
 │   ├── theme-manager.js  # Theme switching
 │   └── websocket-manager.js # Real-time updates
-├── favicon.png           # Favicon
+├── favicon.svg           # Favicon
 ├── index.html            # Main HTML page
 └── README.md             # Documentation
 ```

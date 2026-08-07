@@ -166,10 +166,34 @@ a {
   color: var(--text-primary);
 }
 
-.app-header__brand .logo-icon {
-  color: var(--accent);
-  height: 22px;
-  width: auto;
+/* Brand mark badge: fixed dark chip (matches Moonbridge's own logo treatment) so the
+   white logo mark stays legible in both light and dark theme, not themed like the
+   rest of the UI. */
+.app-header__brand .brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-md);
+  background: #0b0d17;
+  flex-shrink: 0;
+}
+
+.app-header__brand .brand-mark img {
+  width: 18px;
+  height: auto;
+  display: block;
+}
+
+/* Brand gradient accent, matching moonbridge.org/explorer's own brand gradient.
+   Fixed across themes, same reasoning as the brand mark above. */
+.app-header__brand .brand-accent {
+  background-image: linear-gradient(to right, #a78bfa, #7dd3fc, #6ee7b7);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
 }
 
 .app-header__meta {
@@ -470,16 +494,6 @@ a {
   left: 0;
   background-color: var(--surface-card);
   z-index: 10;
-}
-
-/* ==========================================================================
-   Header brand icon
-   ========================================================================== */
-
-.logo-icon {
-  height: 16px;
-  width: auto;
-  vertical-align: middle;
 }
 
 /* ==========================================================================
