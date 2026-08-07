@@ -127,6 +127,10 @@ type Config struct {
 	// This is useful if the dashboard will be public.
 	HideLogs bool `yaml:"hide_logs"`
 
+	// DashboardAuth optionally protects the entire dashboard (viewing, /silence, /unsilence,
+	// and /ws) with HTTP Basic Auth. Disabled by default for backward compatibility.
+	DashboardAuth DashboardAuthConfig `yaml:"dashboard_auth"`
+
 	// NodeDownMin controls how long we wait before sending an alert that a node is not responding or has
 	// fallen behind.
 	NodeDownMin int `yaml:"node_down_alert_minutes"`
@@ -471,6 +475,14 @@ type HealthcheckConfig struct {
 	PingRate time.Duration `yaml:"ping_rate"`
 }
 
+// DashboardAuthConfig controls optional HTTP Basic Auth for the dashboard.
+type DashboardAuthConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Username string `yaml:"username"`
+	// PasswordHash is a bcrypt hash, never plaintext. Generate one with `tenderduty -hash-password`.
+	PasswordHash string `yaml:"password_hash"`
+}
+
 type PriceConversionConfig struct {
 	Enabled bool `yaml:"enabled"`
 	// Provider selects which fiat-price API to use: "coinmarketcap" (default, for
@@ -531,6 +543,15 @@ func validateConfig(c *Config) (fatal bool, problems []string) {
 	// with configs that predate the provider switch (same silent-default precedent as
 	// GovernanceAlertsReminderInterval above).
 	c.PriceConversion.Provider = normalizePriceProvider(c.PriceConversion.Provider)
+
+	// dashboard_auth misconfiguration falls back to the previous open-dashboard
+	// behavior with a loud warning, rather than a fatal error — a bad auth block would
+	// otherwise lock the operator out of their own dashboard while the rest of
+	// tenderduty (monitoring/alerting) keeps working fine.
+	if c.DashboardAuth.Enabled && (c.DashboardAuth.Username == "" || c.DashboardAuth.PasswordHash == "") {
+		problems = append(problems, "warning: dashboard_auth.enabled is true but username/password_hash is not set — dashboard authentication disabled")
+		c.DashboardAuth.Enabled = false
+	}
 
 	var wantsPublic bool
 	for k, v := range c.Chains {

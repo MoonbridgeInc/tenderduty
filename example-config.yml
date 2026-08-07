@@ -7,6 +7,13 @@ listen_port: 8888
 # and obscures most node-related details. Be aware this isn't fully vetted for preventing
 # info leaks about node names, etc.
 hide_logs: no
+# Optional: protects the entire dashboard (viewing, /silence, /unsilence, and /ws) with
+# HTTP Basic Auth. Disabled by default. Generate password_hash with `tenderduty -hash-password`
+# (never put a plaintext password here).
+dashboard_auth:
+  enabled: no
+  username: admin
+  password_hash: xxxxxx
 # How long to wait before alerting that a node is down.
 node_down_alert_minutes: 3
 # Node Down alert Pagerduty Severity

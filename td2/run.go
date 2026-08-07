@@ -80,7 +80,12 @@ func Run(configFile, stateFile, chainConfigDirectory string, password *string, d
 	}()
 
 	if td.EnableDash {
-		go dash.Serve(td.Listen, td.updateChan, td.logChan, td.HideLogs, devMode, silenceChain, unsilenceChain, td.alertHistoryChan)
+		go dash.Serve(td.Listen, td.updateChan, td.logChan, td.HideLogs, devMode, silenceChain, unsilenceChain, td.alertHistoryChan,
+			dash.BasicAuthConfig{
+				Enabled:      td.DashboardAuth.Enabled,
+				Username:     td.DashboardAuth.Username,
+				PasswordHash: td.DashboardAuth.PasswordHash,
+			})
 		l(slog.LevelInfo, "starting dashboard on ", td.Listen)
 	} else {
 		go func() {

@@ -1,6 +1,7 @@
 package dash
 
 import (
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"io/fs"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
+	"golang.org/x/crypto/bcrypt"
 )
 
 var (
@@ -161,6 +163,36 @@ func (c *dashCache) getAlertHistoryCache() []byte {
 	return c.alertHistoryCache
 }
 
+// BasicAuthConfig controls optional HTTP Basic Auth protecting every dashboard route,
+// including /ws — browsers resend a cached Authorization header on subsequent requests
+// to the same origin once the user has authenticated once via the browser's native
+// prompt, including the WebSocket upgrade request.
+type BasicAuthConfig struct {
+	Enabled      bool
+	Username     string
+	PasswordHash string // bcrypt hash, e.g. from `tenderduty -hash-password`
+}
+
+// withBasicAuth wraps next with HTTP Basic Auth when cfg.Enabled is true; otherwise it
+// returns next unchanged. Username comparison is constant-time; bcrypt's own comparison
+// is already constant-time for the password.
+func withBasicAuth(next http.Handler, cfg BasicAuthConfig) http.Handler {
+	if !cfg.Enabled {
+		return next
+	}
+	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		user, pass, ok := request.BasicAuth()
+		if !ok ||
+			subtle.ConstantTimeCompare([]byte(user), []byte(cfg.Username)) != 1 ||
+			bcrypt.CompareHashAndPassword([]byte(cfg.PasswordHash), []byte(pass)) != nil {
+			writer.Header().Set("WWW-Authenticate", `Basic realm="tenderduty"`)
+			writer.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(writer, request)
+	})
+}
+
 // newMux builds the dashboard's routes on a private *http.ServeMux — never the
 // package-level http.DefaultServeMux — so it can be constructed independently of
 // ListenAndServe (e.g. by tests) and any number of times in one process.
@@ -267,7 +299,7 @@ func newMux(dc *dashCache, hideLogs, devMode bool, cast *broadcast.Broadcaster,
 
 func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLogs bool, devMode bool,
 	silence func(chain string, minutes int) (time.Time, error), unsilence func(chain string) error,
-	alertHistory chan AlertHistoryEntry) {
+	alertHistory chan AlertHistoryEntry, auth BasicAuthConfig) {
 	var err error
 	rootDir, err = fs.Sub(Content, "static")
 	if err != nil {
@@ -311,9 +343,10 @@ func Serve(port string, updates chan *ChainStatus, logs chan LogMessage, hideLog
 	}()
 
 	mux := newMux(dc, hideLogs, devMode, cast, silence, unsilence)
+	handler := withBasicAuth(mux, auth)
 	server := &http.Server{
 		Addr:              ":" + port,
-		Handler:           mux,
+		Handler:           handler,
 		ReadHeaderTimeout: 3 * time.Second,
 	}
 	err = server.ListenAndServe()

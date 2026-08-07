@@ -91,45 +91,46 @@ sudo journalctl -fu tenderduty
 
 ## 5. Dashboard exposure — read before opening a firewall port
 
-The dashboard (port `8888` by default) has **no authentication**. This is a
-deliberate, current trade-off, not an oversight — but it means anyone who can
-reach the port can view validator details *and* hit `POST /silence` to
-suppress your alerts.
+**Recommended: turn on `dashboard_auth`.** Tenderduty has built-in HTTP Basic Auth for
+the whole dashboard (viewing, `/silence`, `/unsilence`, and `/ws`), disabled by default.
+Generate a bcrypt hash and enable it in `config.yml`:
+```bash
+./tenderduty -hash-password
+# prompts for a password, prints a bcrypt hash — never store the plaintext password
+```
+```yaml
+dashboard_auth:
+  enabled: yes
+  username: admin
+  password_hash: "$2a$..." # paste the hash printed above
+```
+This works regardless of how you expose the port — reverse proxy, direct, tunnel — since
+it's enforced by tenderduty itself, not the network path in front of it.
 
-- Default / recommended: **do not** expose `8888` directly. Access it from
-  the server itself, or tunnel over SSH:
+- Default / recommended if you'd rather not expose the port at all: **do not** expose
+  `8888` directly. Access it from the server itself, or tunnel over SSH:
   ```bash
   ssh -L 8888:localhost:8888 user@your-server
   # then browse to http://localhost:8888 locally
   ```
-- If you need normal URL access, put a reverse proxy in front with basic
-  auth on at least the state-changing endpoints, rather than exposing
-  tenderduty directly. Note that `basic_auth` in the proxy alone isn't
-  sufficient if the raw port is still reachable — someone could hit
-  `http://server-ip:8888/silence` directly and skip the proxy entirely, so
-  make sure `8888` isn't independently reachable (host firewall, or — as is
-  often the case — already blocked at the hosting-provider level; check
-  before assuming either way).
-
-  Example with [Caddy](https://caddyserver.com/):
+- If you're already running a reverse proxy for the domain (e.g. Caddy), you can layer
+  its own `basic_auth` on top of `dashboard_auth` as defense-in-depth — that just means
+  two separate login prompts, which is fine, not required:
   ```
   tenderduty.yourdomain.com {
-      @mutating path /silence* /unsilence*
-      basic_auth @mutating {
+      basic_auth {
           admin JDJhJDE0JGV4YW1wbGVoYXNoZXhhbXBsZQ==
       }
 
       reverse_proxy localhost:8888
   }
   ```
-  Generate the password hash with `caddy hash-password` and swap it in above.
-  This protects `/silence`/`/unsilence` specifically; drop the `@mutating`
-  matcher from the `basic_auth` line if you want the whole dashboard
-  (including `/state`/`/logs`) behind a login too.
+  Generate that hash with `caddy hash-password` (a separate hash from tenderduty's own
+  `-hash-password` — they're two independent layers, not shared credentials).
 
-The Prometheus exporter (`28686` by default) should generally stay closed to
-the public internet too, or be restricted by source IP (e.g. to a Grafana
-host / scraper), for the same reason.
+The Prometheus exporter (`28686` by default) has no auth of its own (it's meant for a
+Prometheus/Grafana scraper, not a browser) — keep it closed to the public internet, or
+restrict it by source IP.
 
 ## Updating later
 

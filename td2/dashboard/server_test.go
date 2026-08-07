@@ -13,6 +13,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"github.com/textileio/go-threads/broadcast"
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestCacheHandlerServeHTTP(t *testing.T) {
@@ -253,6 +254,98 @@ func TestUnsilenceHandler(t *testing.T) {
 			}
 			if tt.wantCalled && gotChain != tt.wantChain {
 				t.Errorf("chain = %q, want %q", gotChain, tt.wantChain)
+			}
+		})
+	}
+}
+
+func TestWithBasicAuth(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("failed to generate test hash: %v", err)
+	}
+	cfg := BasicAuthConfig{Enabled: true, Username: "admin", PasswordHash: string(hash)}
+
+	nextCalled := false
+	next := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		nextCalled = true
+		writer.WriteHeader(http.StatusOK)
+	})
+
+	tests := []struct {
+		name           string
+		cfg            BasicAuthConfig
+		setCredentials bool
+		user           string
+		pass           string
+		wantStatus     int
+		wantNextCalled bool
+	}{
+		{
+			name:           "disabled passes through regardless of credentials",
+			cfg:            BasicAuthConfig{Enabled: false},
+			setCredentials: false,
+			wantStatus:     http.StatusOK,
+			wantNextCalled: true,
+		},
+		{
+			name:           "no credentials",
+			cfg:            cfg,
+			setCredentials: false,
+			wantStatus:     http.StatusUnauthorized,
+			wantNextCalled: false,
+		},
+		{
+			name:           "wrong username",
+			cfg:            cfg,
+			setCredentials: true,
+			user:           "not-admin",
+			pass:           "correct-password",
+			wantStatus:     http.StatusUnauthorized,
+			wantNextCalled: false,
+		},
+		{
+			name:           "wrong password",
+			cfg:            cfg,
+			setCredentials: true,
+			user:           "admin",
+			pass:           "wrong-password",
+			wantStatus:     http.StatusUnauthorized,
+			wantNextCalled: false,
+		},
+		{
+			name:           "correct credentials",
+			cfg:            cfg,
+			setCredentials: true,
+			user:           "admin",
+			pass:           "correct-password",
+			wantStatus:     http.StatusOK,
+			wantNextCalled: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nextCalled = false
+			handler := withBasicAuth(next, tt.cfg)
+
+			req := httptest.NewRequest(http.MethodGet, "/state", nil)
+			if tt.setCredentials {
+				req.SetBasicAuth(tt.user, tt.pass)
+			}
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+
+			if rec.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d", rec.Code, tt.wantStatus)
+			}
+			if nextCalled != tt.wantNextCalled {
+				t.Errorf("next called = %v, want %v", nextCalled, tt.wantNextCalled)
+			}
+			if tt.wantStatus == http.StatusUnauthorized {
+				if got := rec.Header().Get("WWW-Authenticate"); got != `Basic realm="tenderduty"` {
+					t.Errorf("WWW-Authenticate = %q, want %q", got, `Basic realm="tenderduty"`)
+				}
 			}
 		})
 	}
