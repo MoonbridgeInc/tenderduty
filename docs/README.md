@@ -14,6 +14,7 @@ This is a tool for validators running tendermint nodes. It sends notifications w
 - [Setting up CoinMarketCap](coinmarketcap.md)
 - [Setting up CoinGecko](coingecko.md)
 - [Prometheus Exports](prometheus.md)
+- [Setting up Grafana](grafana.md)
 - [Remotely Configuring Tenderduty](remote.md)
 - [Running on Akash](akash.md)
 

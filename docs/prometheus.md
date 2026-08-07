@@ -1,6 +1,8 @@
 # Prometheus Endpoint
 
-This is the list of the prometheus statistics that are exposed by tenderduty. An example Grafana dashboard is planned, but not ready. Some notes about the stats:
+This is the list of the prometheus statistics that are exposed by tenderduty. A ready-to-import
+Grafana dashboard is available at [grafana-dashboard.json](grafana-dashboard.json) — see
+[Setting up Grafana](grafana.md) for how to import it. Some notes about the stats:
 
 - All metrics are gauges, because counters are reset at startup using counters is ill-advised.
 - All endpoints include the following attributes: chain_id, moniker, and name.
