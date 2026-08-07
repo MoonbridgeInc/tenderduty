@@ -1234,6 +1234,41 @@ func evaluateStakeChangeAlert(cc *ChainConfig) (bool, bool) {
 	return alert, resolved
 }
 
+func evaluateCommissionChangeAlert(cc *ChainConfig) (bool, bool) {
+	alert, resolved := false, false
+
+	if cc.valInfo != nil && cc.lastValInfo != nil {
+		commissionNow := cc.valInfo.CommissionRate
+		commissionBefore := cc.lastValInfo.CommissionRate
+		commissionChange := commissionNow - commissionBefore
+
+		threshold := floatVal(cc.Alerts.CommissionChangeThreshold)
+		alertID := fmt.Sprintf("CommissionChange_%s", cc.ValAddress)
+		severity := "warning"
+		trend := "increased"
+		if commissionChange < 0 {
+			trend = "decreased"
+		}
+		message := fmt.Sprintf("%s's commission rate has %s from %.2f%% to %.2f%% (%.2f percentage point change)",
+			cc.valInfo.Moniker, trend, commissionBefore*100, commissionNow*100, math.Abs(commissionChange)*100)
+
+		if math.Abs(commissionChange) >= threshold {
+			if !alarms.exist(cc.name, alertID) {
+				td.alert(cc.name, message, severity, false, &alertID)
+				alert = true
+			}
+		} else {
+			if alarms.exist(cc.name, alertID) {
+				td.alert(cc.name, message, severity, true, &alertID)
+				resolved = true
+			}
+		}
+		cc.activeAlerts = alarms.getCount(cc.name)
+	}
+
+	return alert, resolved
+}
+
 func evaluateUnclaimedRewardsAlert(cc *ChainConfig) (bool, bool) {
 	alert, resolved := false, false
 
@@ -1531,6 +1566,11 @@ func (cc *ChainConfig) watch() {
 		// validator stake change alerts
 		if boolVal(cc.Alerts.StakeChangeAlerts) {
 			evaluateStakeChangeAlert(cc)
+		}
+
+		// validator commission rate change alerts
+		if boolVal(cc.Alerts.CommissionChangeAlerts) {
+			evaluateCommissionChangeAlert(cc)
 		}
 
 		// validator unclaimed rewards alert

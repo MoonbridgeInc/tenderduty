@@ -29,6 +29,8 @@ func alertConfigsEqual(a, b AlertConfig) bool {
 		boolPtrEqual(a.StakeChangeAlerts, b.StakeChangeAlerts) &&
 		floatPtrEqual(a.StakeChangeDropThreshold, b.StakeChangeDropThreshold) &&
 		floatPtrEqual(a.StakeChangeIncreaseThreshold, b.StakeChangeIncreaseThreshold) &&
+		boolPtrEqual(a.CommissionChangeAlerts, b.CommissionChangeAlerts) &&
+		floatPtrEqual(a.CommissionChangeThreshold, b.CommissionChangeThreshold) &&
 		boolPtrEqual(a.UnclaimedRewardsAlerts, b.UnclaimedRewardsAlerts) &&
 		floatPtrEqual(a.UnclaimedRewardsThreshold, b.UnclaimedRewardsThreshold) &&
 		pdConfigsEqual(a.Pagerduty, b.Pagerduty) &&

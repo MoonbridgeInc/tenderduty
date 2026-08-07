@@ -150,6 +150,13 @@ default_alert_config:
   stake_change_drop_threshold: 0.05 # meaning 5%
   stake_change_increase_threshold: 0.05 # meaning 5%
 
+  # Alert when a validator's commission rate changes by more than the threshold (in
+  # either direction). Commission changes are rare, deliberate actions on most chains
+  # (often rate-limited to e.g. 1%/day), so an unexpected change can be an early signal
+  # of a compromised operator key, not just an economic decision.
+  commission_change_alerts: yes
+  commission_change_alert_threshold: 0.01 # meaning 1 percentage point
+
   # Alert when a validator has more than the threhold value of unclaimed rewards
   # The threshold is defined with a fiat currency unit like USD, so this feature requires properly
   # configuring convert_to_fiat and the API token for whichever provider is selected (coin_market_cap_api_token or coin_gecko_api_token)

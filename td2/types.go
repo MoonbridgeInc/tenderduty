@@ -108,16 +108,16 @@ func floatVal(v *float64) float64 {
 
 // Config holds both the settings for tenderduty to monitor and state information while running.
 type Config struct {
-	alertChan           chan *alertMsg // channel used for outgoing notifications
-	updateChan          chan *dash.ChainStatus
-	logChan             chan dash.LogMessage
-	alertHistoryChan    chan dash.AlertHistoryEntry
-	statsChan           chan *promUpdate
-	ctx                 context.Context
-	cancel              context.CancelFunc
-	alarms              *alarmCache
-	priceConverter      utils.PriceConverter
-	tenderdutyCache     *utils.TenderdutyCache // used for caching different kinds of data in memory, such as bank metadata quried from our GitHub repo
+	alertChan        chan *alertMsg // channel used for outgoing notifications
+	updateChan       chan *dash.ChainStatus
+	logChan          chan dash.LogMessage
+	alertHistoryChan chan dash.AlertHistoryEntry
+	statsChan        chan *promUpdate
+	ctx              context.Context
+	cancel           context.CancelFunc
+	alarms           *alarmCache
+	priceConverter   utils.PriceConverter
+	tenderdutyCache  *utils.TenderdutyCache // used for caching different kinds of data in memory, such as bank metadata quried from our GitHub repo
 
 	// EnableDash enables the web dashboard
 	EnableDash bool `yaml:"enable_dashboard"`
@@ -382,6 +382,12 @@ type AlertConfig struct {
 	StakeChangeAlerts            *bool    `yaml:"stake_change_alerts"`
 	StakeChangeDropThreshold     *float64 `yaml:"stake_change_drop_threshold"`
 	StakeChangeIncreaseThreshold *float64 `yaml:"stake_change_increase_threshold"`
+
+	// Whether to alert when a validator's commission rate changes by more than the
+	// threshold. Commission changes are rare, deliberate actions (most chains rate-limit
+	// them) — an unexpected change is an early signal of a compromised operator key.
+	CommissionChangeAlerts    *bool    `yaml:"commission_change_alerts"`
+	CommissionChangeThreshold *float64 `yaml:"commission_change_alert_threshold"`
 
 	// Whether to alert when a validator has more than the threhold value of unclaimed rewards
 	UnclaimedRewardsAlerts    *bool    `yaml:"unclaimed_rewards_alerts"`

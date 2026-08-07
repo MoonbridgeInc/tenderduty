@@ -2336,6 +2336,206 @@ func TestEvaluateStakeChangeAlert(t *testing.T) {
 	}
 }
 
+func TestEvaluateCommissionChangeAlert(t *testing.T) {
+	// Setup test alarm cache
+	testAlarms := &alarmCache{
+		AllAlarms: make(map[string]map[string]alertMsgCache),
+		notifyMux: sync.RWMutex{},
+	}
+	originalAlarms := alarms
+	alarms = testAlarms
+	defer func() { alarms = originalAlarms }()
+
+	// Setup test td
+	originalTd := td
+	td = createTestConfig()
+	defer func() { td = originalTd }()
+
+	tests := []struct {
+		name               string
+		currentCommission  float64
+		previousCommission float64
+		threshold          float64
+		existingAlert      bool
+		expectedAlert      bool
+		expectedResolved   bool
+		description        string
+	}{
+		{
+			name:               "should trigger alert when commission increases above threshold",
+			currentCommission:  0.10,
+			previousCommission: 0.05,
+			threshold:          0.01,
+			existingAlert:      false,
+			expectedAlert:      true,
+			expectedResolved:   false,
+			description:        "Should alert when commission increases by more than 1 percentage point",
+		},
+		{
+			name:               "should trigger alert when commission decreases above threshold",
+			currentCommission:  0.02,
+			previousCommission: 0.05,
+			threshold:          0.01,
+			existingAlert:      false,
+			expectedAlert:      true,
+			expectedResolved:   false,
+			description:        "Should alert when commission decreases by more than 1 percentage point",
+		},
+		{
+			name:               "should not trigger duplicate alert",
+			currentCommission:  0.10,
+			previousCommission: 0.05,
+			threshold:          0.01,
+			existingAlert:      true,
+			expectedAlert:      false,
+			expectedResolved:   false,
+			description:        "Should not trigger duplicate alert",
+		},
+		{
+			name:               "should resolve alert when commission change is within threshold",
+			currentCommission:  0.051,
+			previousCommission: 0.05,
+			threshold:          0.01,
+			existingAlert:      true,
+			expectedAlert:      false,
+			expectedResolved:   true,
+			description:        "Should resolve alert when commission change is within acceptable range",
+		},
+		{
+			name:               "should not alert when change is within threshold",
+			currentCommission:  0.051,
+			previousCommission: 0.05,
+			threshold:          0.01,
+			existingAlert:      false,
+			expectedAlert:      false,
+			expectedResolved:   false,
+			description:        "Should not alert when commission change is within threshold",
+		},
+		{
+			name:               "should not alert when commission is unchanged",
+			currentCommission:  0.05,
+			previousCommission: 0.05,
+			threshold:          0.01,
+			existingAlert:      false,
+			expectedAlert:      false,
+			expectedResolved:   false,
+			description:        "Should not alert when commission has not changed at all",
+		},
+	}
+
+	// nil valInfo/lastValInfo scenarios
+	nilTests := []struct {
+		name             string
+		valInfo          *ValInfo
+		lastValInfo      *ValInfo
+		existingAlert    bool
+		expectedAlert    bool
+		expectedResolved bool
+		description      string
+	}{
+		{
+			name:             "should not trigger alert when valInfo is nil",
+			valInfo:          nil,
+			lastValInfo:      &ValInfo{CommissionRate: 0.05},
+			existingAlert:    false,
+			expectedAlert:    false,
+			expectedResolved: false,
+			description:      "Should not alert when valInfo is nil",
+		},
+		{
+			name:             "should not trigger alert when lastValInfo is nil",
+			valInfo:          &ValInfo{CommissionRate: 0.05},
+			lastValInfo:      nil,
+			existingAlert:    false,
+			expectedAlert:    false,
+			expectedResolved: false,
+			description:      "Should not alert when lastValInfo is nil",
+		},
+		{
+			name:             "should not trigger alert when both valInfo and lastValInfo are nil",
+			valInfo:          nil,
+			lastValInfo:      nil,
+			existingAlert:    false,
+			expectedAlert:    false,
+			expectedResolved: false,
+			description:      "Should not alert when both valInfo and lastValInfo are nil",
+		},
+	}
+
+	for _, tt := range nilTests {
+		t.Run(tt.name, func(t *testing.T) {
+			testAlarms.AllAlarms = make(map[string]map[string]alertMsgCache)
+
+			cc := &ChainConfig{
+				name:        "test-chain",
+				ChainId:     "test-chain-1",
+				ValAddress:  "testval123",
+				valInfo:     tt.valInfo,
+				lastValInfo: tt.lastValInfo,
+				Alerts: AlertConfig{
+					CommissionChangeThreshold: &[]float64{0.01}[0],
+				},
+			}
+
+			if tt.existingAlert {
+				testAlarms.AllAlarms["test-chain"] = make(map[string]alertMsgCache)
+				testAlarms.AllAlarms["test-chain"]["CommissionChange_testval123"] = alertMsgCache{
+					Message:  "test alert",
+					SentTime: time.Now(),
+				}
+			}
+
+			alert, resolved := evaluateCommissionChangeAlert(cc)
+
+			if alert != tt.expectedAlert {
+				t.Errorf("%s: expected alert %v, got %v", tt.description, tt.expectedAlert, alert)
+			}
+			if resolved != tt.expectedResolved {
+				t.Errorf("%s: expected resolved %v, got %v", tt.description, tt.expectedResolved, resolved)
+			}
+		})
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testAlarms.AllAlarms = make(map[string]map[string]alertMsgCache)
+
+			cc := &ChainConfig{
+				name:       "test-chain",
+				ChainId:    "test-chain-1",
+				ValAddress: "testval123",
+				valInfo: &ValInfo{
+					Moniker:        "test-validator",
+					CommissionRate: tt.currentCommission,
+				},
+				lastValInfo: &ValInfo{
+					CommissionRate: tt.previousCommission,
+				},
+				Alerts: AlertConfig{
+					CommissionChangeThreshold: &tt.threshold,
+				},
+			}
+
+			if tt.existingAlert {
+				testAlarms.AllAlarms["test-chain"] = make(map[string]alertMsgCache)
+				testAlarms.AllAlarms["test-chain"]["CommissionChange_testval123"] = alertMsgCache{
+					Message:  "test alert",
+					SentTime: time.Now(),
+				}
+			}
+
+			alert, resolved := evaluateCommissionChangeAlert(cc)
+
+			if alert != tt.expectedAlert {
+				t.Errorf("%s: expected alert %v, got %v", tt.description, tt.expectedAlert, alert)
+			}
+			if resolved != tt.expectedResolved {
+				t.Errorf("%s: expected resolved %v, got %v", tt.description, tt.expectedResolved, resolved)
+			}
+		})
+	}
+}
+
 func TestAlertSuppressedWhileSilenced(t *testing.T) {
 	testAlarms := &alarmCache{
 		AllAlarms: make(map[string]map[string]alertMsgCache),
