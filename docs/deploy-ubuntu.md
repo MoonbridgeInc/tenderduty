@@ -52,7 +52,10 @@ Sanity-check it starts cleanly before wiring up the service:
 
 ```bash
 sudo useradd --system --home /var/lib/tenderduty --create-home tenderduty
-sudo cp tenderduty /var/lib/tenderduty/tenderduty
+# `install` (not `cp`) replaces the file by swapping it out rather than writing
+# in place, so it won't fail with "Text file busy" if an older tenderduty binary
+# at this path happens to still be running (e.g. from a previous deploy).
+sudo install -m 755 tenderduty /var/lib/tenderduty/tenderduty
 sudo cp config.yml /var/lib/tenderduty/config.yml
 sudo chown -R tenderduty:tenderduty /var/lib/tenderduty
 
@@ -138,7 +141,7 @@ restrict it by source IP.
 cd tenderduty
 git pull
 go build -ldflags '-s -w' -trimpath -o tenderduty main.go
-sudo cp tenderduty /var/lib/tenderduty/tenderduty
+sudo install -m 755 tenderduty /var/lib/tenderduty/tenderduty
 sudo systemctl restart tenderduty
 sudo journalctl -fu tenderduty   # confirm it came back up cleanly
 ```
