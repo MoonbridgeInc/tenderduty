@@ -361,15 +361,14 @@ type CacheHandler struct {
 }
 
 func (ch CacheHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	if ch.devMode {
-		// devMode serves straight off disk specifically so edits show up live;
-		// a long-lived cache would defeat that, forcing a hard-refresh after
-		// every change. Browsers still get to skip the body via a 304 when the
-		// file's mtime/ETag (set by http.FileServer) hasn't changed.
-		writer.Header().Set("Cache-Control", "no-cache")
-	} else {
-		writer.Header().Set("Cache-Control", "public, max-age=3600")
-	}
+	// no-cache (not no-store): the browser still revalidates against
+	// Last-Modified/ETag (set automatically by http.FileServer below) and gets a
+	// fast 304 when nothing changed, but it can never silently keep serving assets
+	// from a *previous deploy* for up to an hour like `max-age=3600` did — a real
+	// deploy footgun (ship a new build, the dashboard renders empty/broken for
+	// existing visitors until their cache happens to expire) is worth the small
+	// extra round-trip on a low-traffic, self-hosted ops dashboard.
+	writer.Header().Set("Cache-Control", "no-cache")
 	writer.Header().Set("X-Powered-By", "https://github.com/MoonbridgeInc/tenderduty")
 	if ch.devMode {
 		http.FileServer(http.Dir("./td2/static")).ServeHTTP(writer, request)

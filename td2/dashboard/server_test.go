@@ -46,8 +46,8 @@ func TestCacheHandlerServeHTTP(t *testing.T) {
 		rec := httptest.NewRecorder()
 		h.ServeHTTP(rec, req)
 
-		if got := rec.Header().Get("Cache-Control"); got != "public, max-age=3600" {
-			t.Errorf("Cache-Control = %q, want %q", got, "public, max-age=3600")
+		if got := rec.Header().Get("Cache-Control"); got != "no-cache" {
+			t.Errorf("Cache-Control = %q, want %q", got, "no-cache")
 		}
 		if got := rec.Header().Get("X-Powered-By"); got != "https://github.com/MoonbridgeInc/tenderduty" {
 			t.Errorf("X-Powered-By = %q, want %q", got, "https://github.com/MoonbridgeInc/tenderduty")
