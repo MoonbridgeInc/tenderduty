@@ -364,7 +364,12 @@ func (cc *ChainConfig) GetValInfo(first bool) (err error) {
 		if error != nil {
 			return
 		}
-		if first && td.Prom {
+		// Window == 0 already guarantees this only fires once per chain, on
+		// whichever call first succeeds - gating on `first` too meant a chain
+		// whose very first GetValInfo(true) call failed (e.g. a transient RPC
+		// hiccup at startup) would never get these metrics for the rest of the
+		// process's life, even once later retries succeeded.
+		if td.Prom {
 			td.statsChan <- cc.mkUpdate(metricWindowSize, float64(slashingParams.SignedBlocksWindow), "")
 			td.statsChan <- cc.mkUpdate(metricTotalNodes, float64(len(cc.Nodes)), "")
 		}
