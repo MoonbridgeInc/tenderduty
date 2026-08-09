@@ -1,5 +1,10 @@
 # Setting up Grafana
 
+Don't have Prometheus or Grafana installed yet? See
+[Deploying Prometheus + node_exporter + Grafana + Telegram alerts](monitoring-stack.md)
+for a full from-scratch setup. This page assumes both already exist and just covers
+importing tenderduty's dashboard.
+
 A ready-to-import dashboard is available at
 [grafana-dashboard.json](grafana-dashboard.json), covering everything the
 [Prometheus exporter](prometheus.md) exposes: consensus health (consecutive misses,
