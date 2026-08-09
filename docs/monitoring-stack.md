@@ -207,22 +207,85 @@ alerts separate from validator alerts — either works, it's just a contact poin
 
 Save, then **Test** — you should get a message in the channel immediately.
 
-#### Example alert rule: disk filling up
-**Alerting → Alert rules → New alert rule**:
-- Query (Prometheus data source):
+#### Evaluation groups
+Alert rules run at the interval their *evaluation group* is set to, and pending period
+can't be shorter than that interval — so two groups covers everything below:
+- **`infra-alerts`** — interval `5m`. For anything that trends slowly (disk, memory,
+  load) where a one-off blip shouldn't page you.
+- **`infra-alerts-fast`** — interval `1m`. For binary up/down checks where you want to
+  know quickly.
+
+Create both once via **+ New evaluation group** the first time you need them; every rule
+below just picks whichever already exists from the dropdown.
+
+For every rule: query goes in **Code** mode (not the visual Builder — simpler to just
+paste PromQL directly), and notifications route to the `telegram-infra` contact point
+created above.
+
+#### Disk filling up
+- Query:
   ```
   100 - (node_filesystem_avail_bytes{mountpoint="/"} / node_filesystem_size_bytes{mountpoint="/"} * 100)
   ```
-- Condition: `IS ABOVE 90` (fires when root filesystem is over 90% full)
-- Evaluation: every `1m`, for `5m` (avoids a one-off blip firing an alert)
-- Labels/notifications: route to a notification policy pointing at the `telegram-infra`
-  contact point created above (or set it directly as the contact point for this rule)
+- Condition: `IS ABOVE 90`
+- Evaluation group: `infra-alerts` — Pending period: `5m`
 
-This is just one example — anything you can query in Prometheus (tenderduty's own metrics
-included, e.g. `tenderduty_consecutive_missed_blocks`) can become a Grafana alert rule the
-same way. For pure validator-consensus alerting though, prefer tenderduty's own built-in
-alerts ([config.md](config.md)) — they already understand slashing windows, jailing, and
-double-signing far better than a generic PromQL threshold would.
+#### Memory low
+- Query:
+  ```
+  node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes * 100
+  ```
+- Condition: `IS BELOW 10`
+- Evaluation group: `infra-alerts` — Pending period: `5m`
+
+#### High load average
+- Query:
+  ```
+  node_load1 / scalar(count(count(node_cpu_seconds_total) by (cpu)))
+  ```
+  (`node_load1` divided by core count, so 1.0 = "fully busy"; the inner double-`count()`
+  counts distinct cores, and the whole thing needs wrapping in `scalar()` — without it,
+  the result carries no labels and won't match against `node_load1{instance=...}`, so the
+  query silently returns no data.)
+- Condition: `IS ABOVE 1.3` — deliberately *above* 1.0 (100% busy), not below. A validator
+  box running several chains' full nodes will legitimately sit at or near 1.0 most of the
+  time; that's normal, not a problem. Only alert once load meaningfully exceeds core count
+  (processes genuinely queuing for CPU, not just "busy"). Tune based on your own box's
+  baseline — check `htop`/`btop`'s load average against its core count first.
+- Evaluation group: `infra-alerts` — Pending period: `5m`
+
+#### node_exporter down
+- Query:
+  ```
+  up{job="node_exporter"}
+  ```
+- Condition: `IS BELOW 1`
+- Evaluation group: `infra-alerts-fast` — Pending period: `1m`
+- Caveat: this catches node_exporter crashing or a network blip to it — it does **not**
+  catch the whole server going down, since Prometheus/Grafana live on the same box and
+  can't alert on their own host being unreachable. True external uptime monitoring needs
+  a checker running on a *different* machine (healthchecks.io, UptimeRobot, etc.).
+
+#### tenderduty down
+- Query:
+  ```
+  up{job="tenderduty"}
+  ```
+- Condition: `IS BELOW 1`
+- Evaluation group: `infra-alerts-fast` — Pending period: `1m`
+- Same caveat as above, plus: this only means Prometheus can't scrape tenderduty's
+  `/metrics` — tenderduty's own `healthcheck.enabled` ([config.md](config.md)) is a
+  separate, independent dead-man's-switch mechanism for the same underlying concern
+  (tenderduty itself crashing), worth having both.
+
+---
+
+These five cover host + process liveness. Anything else queryable in Prometheus
+(tenderduty's own metrics included, e.g. `tenderduty_consecutive_missed_blocks`) can
+become a Grafana alert rule the same way. For pure validator-consensus alerting though,
+prefer tenderduty's own built-in alerts ([config.md](config.md)) — they already understand
+slashing windows, jailing, and double-signing far better than a generic PromQL threshold
+would; treat Grafana alerting here as infra-level coverage, not a replacement.
 
 ## Updating later
 
