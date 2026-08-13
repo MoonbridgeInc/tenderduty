@@ -59,6 +59,38 @@ func TestCacheHandlerServeHTTP(t *testing.T) {
 			t.Errorf("body = %q, want %q", got, "hi")
 		}
 	})
+
+	t.Run("prod mode ETag enables a cheap 304 on repeat requests", func(t *testing.T) {
+		originalRootDir := rootDir
+		rootDir = fstest.MapFS{
+			"index.html": &fstest.MapFile{Data: []byte("hi")},
+		}
+		defer func() { rootDir = originalRootDir }()
+
+		h := CacheHandler{devMode: false}
+
+		req1 := httptest.NewRequest(http.MethodGet, "/", nil)
+		rec1 := httptest.NewRecorder()
+		h.ServeHTTP(rec1, req1)
+		etag := rec1.Header().Get("ETag")
+		if etag == "" {
+			t.Fatalf("expected an ETag header on the first response, got none")
+		}
+		if rec1.Code != http.StatusOK {
+			t.Fatalf("first request status = %d, want %d", rec1.Code, http.StatusOK)
+		}
+
+		req2 := httptest.NewRequest(http.MethodGet, "/", nil)
+		req2.Header.Set("If-None-Match", etag)
+		rec2 := httptest.NewRecorder()
+		h.ServeHTTP(rec2, req2)
+		if rec2.Code != http.StatusNotModified {
+			t.Errorf("second request (matching If-None-Match) status = %d, want %d", rec2.Code, http.StatusNotModified)
+		}
+		if rec2.Body.Len() != 0 {
+			t.Errorf("304 response body should be empty, got %d bytes", rec2.Body.Len())
+		}
+	})
 }
 
 func TestLogsEnabledHandler(t *testing.T) {
@@ -348,6 +380,54 @@ func TestWithBasicAuth(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestWithBasicAuthCachesVerifiedHeader exercises the fast path directly: unlike
+// TestWithBasicAuth's table (which constructs a fresh handler, and so a fresh empty
+// cache, per case), this sends multiple requests through the *same* handler instance
+// to confirm the cache actually gets used, and doesn't leak into false positives for
+// different credentials.
+func TestWithBasicAuthCachesVerifiedHeader(t *testing.T) {
+	hash, err := bcrypt.GenerateFromPassword([]byte("correct-password"), bcrypt.MinCost)
+	if err != nil {
+		t.Fatalf("failed to generate test hash: %v", err)
+	}
+	cfg := BasicAuthConfig{Enabled: true, Username: "admin", PasswordHash: string(hash)}
+
+	nextCalled := false
+	next := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		nextCalled = true
+		writer.WriteHeader(http.StatusOK)
+	})
+	handler := withBasicAuth(next, cfg)
+
+	doRequest := func(user, pass string) int {
+		nextCalled = false
+		req := httptest.NewRequest(http.MethodGet, "/state", nil)
+		req.SetBasicAuth(user, pass)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if !nextCalled && rec.Code == http.StatusOK {
+			t.Fatalf("got 200 but next was never called")
+		}
+		return rec.Code
+	}
+
+	if got := doRequest("admin", "correct-password"); got != http.StatusOK {
+		t.Fatalf("first (uncached) correct request: status = %d, want %d", got, http.StatusOK)
+	}
+	if got := doRequest("admin", "correct-password"); got != http.StatusOK {
+		t.Fatalf("second (should hit cache) correct request: status = %d, want %d", got, http.StatusOK)
+	}
+	// A cached "known-good" header must not let a *different*, wrong credential
+	// through - the fast path only matches on an exact header comparison.
+	if got := doRequest("admin", "wrong-password"); got != http.StatusUnauthorized {
+		t.Fatalf("wrong password after a cached good header: status = %d, want %d", got, http.StatusUnauthorized)
+	}
+	// The real (still valid) credential must keep working afterwards.
+	if got := doRequest("admin", "correct-password"); got != http.StatusOK {
+		t.Fatalf("correct request after an intervening wrong one: status = %d, want %d", got, http.StatusOK)
 	}
 }
 

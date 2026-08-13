@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -23,6 +24,18 @@ var (
 	Content embed.FS
 	rootDir fs.FS
 	rex     = regexp.MustCompile(`\W(https?|tcp|wss?)://.+\w`)
+
+	// buildID identifies this running process for HTTP caching purposes. Static
+	// assets embedded via go:embed report a zero ModTime, so http.FileServer never
+	// emits Last-Modified for them - "Cache-Control: no-cache" then has nothing to
+	// revalidate against, and silently degrades into "refetch everything, always".
+	// A fixed ETag for the process's whole lifetime fixes that: unchanged between
+	// requests (cheap 304s via http.ServeContent's own If-None-Match handling, which
+	// respects an ETag already set on the response before it runs), but different
+	// after every new deploy (new process => new buildID => the old cached ETag no
+	// longer matches => a real refetch) - exactly the guarantee no-cache was added
+	// for in the first place.
+	buildID = `"` + strconv.FormatInt(time.Now().UnixNano(), 10) + `"`
 )
 
 const logLength = 256
@@ -174,13 +187,30 @@ type BasicAuthConfig struct {
 }
 
 // withBasicAuth wraps next with HTTP Basic Auth when cfg.Enabled is true; otherwise it
-// returns next unchanged. Username comparison is constant-time; bcrypt's own comparison
-// is already constant-time for the password.
+// returns next unchanged. Username comparison and the cache check below are
+// constant-time; bcrypt's own comparison is already constant-time for the password.
 func withBasicAuth(next http.Handler, cfg BasicAuthConfig) http.Handler {
 	if !cfg.Enabled {
 		return next
 	}
+
+	// Browsers resend the exact same Authorization header on every request once
+	// they've authenticated once - without this, bcrypt (deliberately slow, to resist
+	// brute-forcing) would run again on every single asset/API/websocket-handshake
+	// request, making the whole dashboard noticeably sluggish. Since the configured
+	// username/password never change without a process restart, there's only ever one
+	// possible correct header value - cache it and skip straight past bcrypt for
+	// repeat requests carrying it.
+	var verifiedHeader atomic.Pointer[string]
+
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		authHeader := request.Header.Get("Authorization")
+		if cached := verifiedHeader.Load(); authHeader != "" && cached != nil &&
+			subtle.ConstantTimeCompare([]byte(authHeader), []byte(*cached)) == 1 {
+			next.ServeHTTP(writer, request)
+			return
+		}
+
 		user, pass, ok := request.BasicAuth()
 		if !ok ||
 			subtle.ConstantTimeCompare([]byte(user), []byte(cfg.Username)) != 1 ||
@@ -189,6 +219,7 @@ func withBasicAuth(next http.Handler, cfg BasicAuthConfig) http.Handler {
 			writer.WriteHeader(http.StatusUnauthorized)
 			return
 		}
+		verifiedHeader.Store(&authHeader)
 		next.ServeHTTP(writer, request)
 	})
 }
@@ -361,18 +392,20 @@ type CacheHandler struct {
 }
 
 func (ch CacheHandler) ServeHTTP(writer http.ResponseWriter, request *http.Request) {
-	// no-cache (not no-store): the browser still revalidates against
-	// Last-Modified/ETag (set automatically by http.FileServer below) and gets a
-	// fast 304 when nothing changed, but it can never silently keep serving assets
-	// from a *previous deploy* for up to an hour like `max-age=3600` did — a real
-	// deploy footgun (ship a new build, the dashboard renders empty/broken for
-	// existing visitors until their cache happens to expire) is worth the small
-	// extra round-trip on a low-traffic, self-hosted ops dashboard.
+	// no-cache (not no-store): the browser still revalidates before reusing a cached
+	// response, so it can never silently keep serving assets from a *previous
+	// deploy* for up to an hour like `public, max-age=3600` did — a real deploy
+	// footgun (ship a new build, the dashboard renders empty/broken for existing
+	// visitors until their cache happens to expire). In devMode, http.FileServer's
+	// own Last-Modified (from real file mtimes on disk) makes revalidation cheap
+	// automatically. In prod, buildID (see var above) does the same job for
+	// go:embed'd assets, which don't carry a usable mtime of their own.
 	writer.Header().Set("Cache-Control", "no-cache")
 	writer.Header().Set("X-Powered-By", "https://github.com/MoonbridgeInc/tenderduty")
 	if ch.devMode {
 		http.FileServer(http.Dir("./td2/static")).ServeHTTP(writer, request)
 	} else {
+		writer.Header().Set("ETag", buildID)
 		http.FileServer(http.FS(rootDir)).ServeHTTP(writer, request)
 	}
 }
