@@ -30,7 +30,11 @@ sudo cp /tmp/prometheus-${PROM_VERSION}.linux-amd64/prometheus /tmp/prometheus-$
 sudo chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
 ```
 
-Config — scrapes tenderduty and node_exporter locally:
+Config — scrapes tenderduty and node_exporter locally. The `relabel_configs` blocks
+override the `instance` label from the default `host:port` (e.g. `localhost:9100`,
+meaningless in an alert notification) to a readable server name — replace
+`your-server-name` with whatever makes sense to you; it'll show up everywhere `instance`
+does, not just alert messages, including the Node Exporter Full dashboard from step 4:
 
 ```bash
 sudo tee /etc/prometheus/prometheus.yml << 'EOF'
@@ -41,10 +45,16 @@ scrape_configs:
   - job_name: tenderduty
     static_configs:
       - targets: ["localhost:28686"]
+    relabel_configs:
+      - target_label: instance
+        replacement: your-server-name
 
   - job_name: node_exporter
     static_configs:
       - targets: ["localhost:9100"]
+    relabel_configs:
+      - target_label: instance
+        replacement: your-server-name
 EOF
 sudo chown prometheus:prometheus /etc/prometheus/prometheus.yml
 ```
