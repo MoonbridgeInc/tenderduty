@@ -34,7 +34,7 @@ Config — scrapes tenderduty and node_exporter locally. The `relabel_configs` b
 override the `instance` label from the default `host:port` (e.g. `localhost:9100`,
 meaningless in an alert notification) to a readable server name — replace
 `your-server-name` with whatever makes sense to you; it'll show up everywhere `instance`
-does, not just alert messages, including the Node Exporter Full dashboard from step 4:
+does, not just alert messages, including the Node Exporter Full dashboard from step 5:
 
 ```bash
 sudo tee /etc/prometheus/prometheus.yml << 'EOF'
@@ -137,10 +137,59 @@ curl -s localhost:9100/metrics | head -5   # sanity check
 ```
 
 Also bound to `127.0.0.1` only — same reasoning as Prometheus itself. Confirm Prometheus
-picked it up: open `http://localhost:9090/targets` (over an SSH tunnel, see step 5) and
+picked it up: open `http://localhost:9090/targets` (over an SSH tunnel, see step 6) and
 check both `tenderduty` and `node_exporter` jobs show **UP**.
 
-## 3. Install Grafana
+## 3. Adding another server (optional)
+
+To monitor more than one machine from this same Prometheus/Grafana, install node_exporter
+on each additional server and add it as its own scrape target — no need for a second
+Prometheus or Grafana.
+
+On the **new** server, same node_exporter install as step 2, except it needs to listen on
+more than just localhost (Prometheus is reaching in from a different machine):
+```bash
+ExecStart=/usr/local/bin/node_exporter --web.listen-address=0.0.0.0:9100
+```
+
+**Firewall this before anything else** — node_exporter has no authentication of its own.
+If the new server's own firewall is `ufw`, restrict it to only the Prometheus server's IP:
+```bash
+sudo ufw allow from <PROMETHEUS_SERVER_IP> to any port 9100 proto tcp
+```
+If your hosting provider manages firewalling separately (a cloud firewall / security group,
+not `ufw` on the box itself), add the equivalent rule there instead — TCP 9100, source =
+the Prometheus server's IP only, never "anywhere."
+
+On the **Prometheus server**, add a new job to `prometheus.yml`. Give it its own,
+genuinely distinguishing `instance` name — not a generic category like "nodes" or
+"services". If you ever add a third server, a vague shared name like that stops telling
+you which machine an alert is actually about:
+```yaml
+  - job_name: node_exporter_<short-name-for-this-server>
+    static_configs:
+      - targets: ["<NEW_SERVER_IP>:9100"]
+    relabel_configs:
+      - target_label: instance
+        replacement: <a-real-distinguishing-name>
+```
+```bash
+sudo systemctl restart prometheus
+```
+
+Nothing else to do — the Node Exporter Full dashboard's `instance`/`nodename` pickers and
+all five Telegram alert rules from step 7 already apply to *any* matching instance (none
+of them filter by instance), so the new server is automatically covered.
+
+**Gotcha, if you rename a `job_name` later:** Prometheus doesn't retroactively rename old
+data — samples already stored under the old name stay queryable (within your retention
+window) under that old label. Grafana's dropdowns populate from *any* label value seen in
+the selected time range, so a renamed job keeps showing up as a stale, no-longer-scraped
+"ghost" option for a while. Harmless, not a bug — it drops out on its own once those old
+samples age out of whatever time range the dashboard is showing (or past
+`storage.tsdb.retention.time` entirely).
+
+## 4. Install Grafana
 
 Via the official APT repo (keeps itself updatable with normal `apt upgrade`, no manual
 version tracking):
@@ -161,9 +210,9 @@ sudo systemctl status grafana-server --no-pager
 Grafana listens on `127.0.0.1:3000` by default in a standard install — not exposed
 publicly yet. First login is `admin`/`admin`; it'll force a password change immediately.
 
-## 4. Add Prometheus as a Grafana data source, import the dashboards
+## 5. Add Prometheus as a Grafana data source, import the dashboards
 
-Once you can reach Grafana (see step 5 for exposing it), follow
+Once you can reach Grafana (see step 6 for exposing it), follow
 [Setting up Grafana](grafana.md) steps 2–3 to add the Prometheus data source and import
 `grafana-dashboard.json` for tenderduty.
 
@@ -171,7 +220,7 @@ For node_exporter, Grafana.com has a well-known community dashboard covering it 
 **Dashboards → New → Import**, dashboard ID **1860** ("Node Exporter Full"), pick the same
 Prometheus data source.
 
-## 5. Expose Grafana
+## 6. Expose Grafana
 
 Unlike tenderduty before `dashboard_auth` existed, Grafana always requires its own login
 out of the box — putting it behind Caddy with just TLS is reasonably safe. Add to the
@@ -202,7 +251,7 @@ ssh -L 3000:localhost:3000 -L 9090:localhost:9090 user@your-server
 (The Prometheus tunnel above is only for checking `/targets`/running ad-hoc queries — don't
 put Prometheus itself behind Caddy, it has no auth of its own.)
 
-## 6. Telegram alerting from Grafana
+## 7. Telegram alerting from Grafana
 
 You can reuse the exact same bot/channel from [Setting up Telegram](telegram.md) if you
 already made one for tenderduty's own alerts, or make a second bot/channel to keep infra
@@ -297,6 +346,48 @@ prefer tenderduty's own built-in alerts ([config.md](config.md)) — they alread
 slashing windows, jailing, and double-signing far better than a generic PromQL threshold
 would; treat Grafana alerting here as infra-level coverage, not a replacement.
 
+## 8. Optional: Caddy metrics
+
+If you're reverse-proxying through Caddy (see [deploy-ubuntu.md](deploy-ubuntu.md)), it
+has built-in Prometheus metrics — request counts, latencies, status-code breakdowns per
+site. They're served over Caddy's **admin API**, which `admin off` in the global options
+block (a hardening choice from that guide) disables entirely.
+
+In the Caddyfile's global options block:
+```caddyfile
+{
+	# admin off        <- remove this line
+	metrics            # global option — the form nested inside `servers { }` still
+	                    # works in some versions but is deprecated
+	...
+}
+```
+The admin API still only binds to `127.0.0.1:2019` by default — same "not reachable from
+outside this box unless you proxy it yourself" exposure as Prometheus/node_exporter.
+
+```bash
+caddy validate --config /etc/caddy/Caddyfile
+sudo systemctl restart caddy   # a full restart, not reload — global options need it
+curl -s localhost:2019/metrics | grep "^caddy_http"   # confirms request metrics exist
+```
+
+Add the scrape target to `prometheus.yml`:
+```yaml
+  - job_name: caddy
+    static_configs:
+      - targets: ["localhost:2019"]
+    metrics_path: /metrics
+    relabel_configs:
+      - target_label: instance
+        replacement: your-server-name
+```
+```bash
+sudo systemctl restart prometheus
+```
+
+Import the dashboard: **Dashboards → New → Import** → ID **22870** ("Caddy") → pick the
+Prometheus data source.
+
 ## Updating later
 
 ```bash
@@ -304,6 +395,7 @@ would; treat Grafana alerting here as infra-level coverage, not a replacement.
 # then:
 sudo systemctl restart prometheus
 sudo systemctl restart node_exporter
+# ...and node_exporter on every additional server from step 3, each on its own box
 
 # Grafana: it's a normal apt package
 sudo apt-get update && sudo apt-get upgrade -y grafana
