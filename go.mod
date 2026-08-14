@@ -9,6 +9,7 @@ require (
 	github.com/go-passwd/validator v0.0.0-20180902184246-0b4c967e436b
 	github.com/go-telegram-bot-api/telegram-bot-api/v5 v5.5.1
 	github.com/go-yaml/yaml v2.1.0+incompatible
+	github.com/gogo/protobuf v1.3.3
 	github.com/gorilla/websocket v1.5.0
 	github.com/near/borsh-go v0.3.1
 	github.com/prometheus/client_golang v1.12.2
@@ -46,7 +47,6 @@ require (
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.5.1 // indirect
 	github.com/godbus/dbus v0.0.0-20190726142602-4481cbc300e2 // indirect
-	github.com/gogo/protobuf v1.3.3 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/btree v1.0.0 // indirect

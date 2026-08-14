@@ -1417,11 +1417,14 @@ func evaluateUnclaimedRewardsAlert(cc *ChainConfig) (bool, bool) {
 	return alert, resolved
 }
 
+// The alert's uniqueId carries both the proposal ID and its voting deadline
+// (as a unix timestamp), so the resolve path below can tell "the validator voted before
+// the deadline" apart from "the deadline passed without a vote" without any extra
+// network round-trip or persisted-state schema change - it just parses its own ID.
 func evaluateUnvotedGovernanceProposalAlert(cc *ChainConfig) (bool, bool) {
 	alert, resolved := false, false
 
-	idTemplate := "UnvotedGovernanceProposal_%s_%d"
-	msgTemplate := "[WARNING] There is an open proposal (#%v) that the validator has not voted on %s%s"
+	idTemplate := "UnvotedGovernanceProposal_%s_%d_%d"
 
 	unvotedProposalMap := make(map[uint64]bool)
 	for _, proposal := range cc.unvotedOpenGovProposals {
@@ -1429,12 +1432,20 @@ func evaluateUnvotedGovernanceProposalAlert(cc *ChainConfig) (bool, bool) {
 	}
 
 	for _, proposal := range cc.unvotedOpenGovProposals {
-		alertID := fmt.Sprintf(idTemplate, cc.ValAddress, proposal.ProposalId)
-		deadline := fmt.Sprintf(", deadline: %s UTC", proposal.VotingEndTime.Format("2006-01-02 15:04"))
-		if cc.Provider.Name == "namada" {
-			deadline = ""
+		alertID := fmt.Sprintf(idTemplate, cc.ValAddress, proposal.ProposalId, proposal.VotingEndTime.Unix())
+
+		titlePart := ""
+		if proposal.Title != "" {
+			titlePart = fmt.Sprintf(": %q", proposal.Title)
 		}
-		alertMsg := fmt.Sprintf(msgTemplate, proposal.ProposalId, cc.name, deadline)
+		deadlinePart := ""
+		if cc.Provider.Name != "namada" {
+			deadlinePart = fmt.Sprintf(", voting ends in %s (%s UTC)",
+				humanDuration(time.Until(proposal.VotingEndTime)),
+				proposal.VotingEndTime.Format("2006-01-02 15:04"))
+		}
+		alertMsg := fmt.Sprintf("[WARNING] Open proposal #%d on %s%s - not yet voted%s",
+			proposal.ProposalId, cc.name, titlePart, deadlinePart)
 
 		if !alarms.exist(cc.name, alertID) {
 			td.alert(
@@ -1448,37 +1459,75 @@ func evaluateUnvotedGovernanceProposalAlert(cc *ChainConfig) (bool, bool) {
 		}
 	}
 
-	messagesToBeResolved := make(map[uint64]string)
+	type resolvingProposal struct {
+		alertID     string
+		proposalID  uint64
+		deadline    time.Time
+		hasDeadline bool
+	}
+	var toResolve []resolvingProposal
 
 	alarms.notifyMux.RLock()
 
 	if alarms.AllAlarms[cc.name] != nil {
 		for alertID := range alarms.AllAlarms[cc.name] {
-			if strings.HasPrefix(alertID, "UnvotedGovernanceProposal") {
-				parts := strings.Split(alertID, "_")
-				if proposalID, err := strconv.ParseUint(parts[len(parts)-1], 10, 64); err == nil {
-					if !unvotedProposalMap[proposalID] {
-						messagesToBeResolved[proposalID] = alertID
-					}
+			if !strings.HasPrefix(alertID, "UnvotedGovernanceProposal") {
+				continue
+			}
+			parts := strings.Split(alertID, "_")
+			if len(parts) < 2 {
+				continue
+			}
+			rp := resolvingProposal{alertID: alertID}
+			// New IDs end in "<proposalID>_<deadlineUnix>"; fall back to the older
+			// "<proposalID>"-only shape for alerts fired before this ID format changed
+			// (still present in a restored state file until they age out or resolve).
+			if pid, err := strconv.ParseUint(parts[len(parts)-2], 10, 64); err == nil {
+				if dl, err := strconv.ParseInt(parts[len(parts)-1], 10, 64); err == nil {
+					rp.proposalID = pid
+					rp.deadline = time.Unix(dl, 0)
+					rp.hasDeadline = true
 				}
+			}
+			if !rp.hasDeadline {
+				pid, err := strconv.ParseUint(parts[len(parts)-1], 10, 64)
+				if err != nil {
+					continue
+				}
+				rp.proposalID = pid
+			}
+			if !unvotedProposalMap[rp.proposalID] {
+				toResolve = append(toResolve, rp)
 			}
 		}
 	}
 
 	alarms.notifyMux.RUnlock()
 
-	for _, alertID := range messagesToBeResolved {
-		if alarms.exist(cc.name, alertID) {
-			alertIDCopy := alertID // Create local copy to avoid implicit memory aliasing
-			td.alert(
-				cc.name,
-				alarms.AllAlarms[cc.name][alertID].Message,
-				"warning",
-				true,
-				&alertIDCopy,
-			)
-			resolved = true
+	for _, rp := range toResolve {
+		if !alarms.exist(cc.name, rp.alertID) {
+			continue
 		}
+		var resolveMsg string
+		switch {
+		case !rp.hasDeadline:
+			resolveMsg = fmt.Sprintf("Proposal #%d on %s is no longer awaiting the validator's vote.", rp.proposalID, cc.name)
+		case time.Now().Before(rp.deadline):
+			resolveMsg = fmt.Sprintf("Proposal #%d on %s - vote recorded before the %s UTC deadline.",
+				rp.proposalID, cc.name, rp.deadline.Format("2006-01-02 15:04"))
+		default:
+			resolveMsg = fmt.Sprintf("[MISSED] Proposal #%d on %s reached its voting deadline (%s UTC) WITHOUT a vote from the validator.",
+				rp.proposalID, cc.name, rp.deadline.Format("2006-01-02 15:04"))
+		}
+		alertIDCopy := rp.alertID // Create local copy to avoid implicit memory aliasing
+		td.alert(
+			cc.name,
+			resolveMsg,
+			"warning",
+			true,
+			&alertIDCopy,
+		)
+		resolved = true
 	}
 
 	cc.activeAlerts = alarms.getCount(cc.name)

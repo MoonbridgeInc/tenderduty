@@ -128,7 +128,7 @@ func (d *DefaultProvider) CheckIfValidatorVoted(ctx context.Context, proposalID 
 	return false, nil
 }
 
-func (d *DefaultProvider) QueryUnvotedOpenProposals(ctx context.Context) ([]gov.Proposal, error) {
+func (d *DefaultProvider) QueryUnvotedOpenProposals(ctx context.Context) ([]govProposal, error) {
 	// get all proposals in voting period
 	qProposal := gov.QueryProposalsRequest{
 		// Filter for only proposals in voting period
@@ -143,8 +143,14 @@ func (d *DefaultProvider) QueryUnvotedOpenProposals(ctx context.Context) ([]gov.
 			proposals := &gov.QueryProposalsResponse{}
 			err = proposals.Unmarshal(resp.Response.Value)
 			if err == nil {
+				// The pinned cosmos-sdk gov.Proposal type has no title/summary fields
+				// (see govProposal's doc comment) even though the query above already
+				// hits the v1 endpoint that returns them on the wire - recover them
+				// separately from the same raw bytes.
+				titles := extractProposalTitles(resp.Response.Value)
+
 				// Step 2: Filter out proposals the validator has already voted on
-				var unvotedProposals []gov.Proposal
+				var unvotedProposals []govProposal
 
 				for _, proposal := range proposals.Proposals {
 					// For each proposal, check if the validator has voted
@@ -160,7 +166,12 @@ func (d *DefaultProvider) QueryUnvotedOpenProposals(ctx context.Context) ([]gov.
 					}
 
 					if !hasVoted {
-						unvotedProposals = append(unvotedProposals, proposal)
+						title := titles[proposal.ProposalId]
+						unvotedProposals = append(unvotedProposals, govProposal{
+							Proposal: proposal,
+							Title:    title.Title,
+							Summary:  title.Summary,
+						})
 					}
 				}
 

@@ -6,12 +6,14 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	gov "github.com/cosmos/cosmos-sdk/x/gov/types"
 	dash "github.com/firstset/tenderduty/v2/td2/dashboard"
+	"github.com/gogo/protobuf/proto"
 )
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
@@ -2643,75 +2645,96 @@ func TestEvaluateUnvotedGovernanceProposalAlert(t *testing.T) {
 	td = createTestConfig()
 	defer func() { td = originalTd }()
 
+	deadline1 := time.Now().Add(24 * time.Hour)
+	deadline2 := time.Now().Add(48 * time.Hour)
+	futureDeadline := time.Now().Add(2 * time.Hour)
+	pastDeadline := time.Now().Add(-2 * time.Hour)
+
 	tests := []struct {
-		name             string
-		unvotedProposals []gov.Proposal
-		existingAlerts   map[string]bool
-		expectedAlert    bool
-		expectedResolved bool
-		description      string
+		name                string
+		unvotedProposals    []govProposal
+		existingAlerts      map[string]bool
+		expectedAlert       bool
+		expectedResolved    bool
+		expectedMsgContains string // if non-empty, checked against the one message evaluateUnvotedGovernanceProposalAlert sends this case
+		description         string
 	}{
 		{
 			name: "should trigger alert for new unvoted proposal",
-			unvotedProposals: []gov.Proposal{
-				{
-					ProposalId:    1,
-					VotingEndTime: time.Now().Add(24 * time.Hour),
-				},
+			unvotedProposals: []govProposal{
+				{Proposal: gov.Proposal{ProposalId: 1, VotingEndTime: deadline1}, Title: "Recover Quicksilver IBC client"},
 			},
-			existingAlerts:   map[string]bool{},
-			expectedAlert:    true,
-			expectedResolved: false,
-			description:      "Should alert for new unvoted governance proposal",
+			existingAlerts:      map[string]bool{},
+			expectedAlert:       true,
+			expectedResolved:    false,
+			expectedMsgContains: `"Recover Quicksilver IBC client"`,
+			description:         "Should alert for new unvoted governance proposal, including its title",
 		},
 		{
 			name: "should not trigger duplicate alert",
-			unvotedProposals: []gov.Proposal{
-				{
-					ProposalId:    1,
-					VotingEndTime: time.Now().Add(24 * time.Hour),
-				},
+			unvotedProposals: []govProposal{
+				{Proposal: gov.Proposal{ProposalId: 1, VotingEndTime: deadline1}},
 			},
 			existingAlerts: map[string]bool{
-				"UnvotedGovernanceProposal_testval123_1": true,
+				fmt.Sprintf("UnvotedGovernanceProposal_testval123_1_%d", deadline1.Unix()): true,
 			},
 			expectedAlert:    false,
 			expectedResolved: false,
 			description:      "Should not trigger duplicate alert for same proposal",
 		},
 		{
-			name:             "should resolve alert when proposal is voted on",
-			unvotedProposals: []gov.Proposal{},
+			name:             "should resolve alert with no known deadline (pre-upgrade ID format)",
+			unvotedProposals: []govProposal{},
 			existingAlerts: map[string]bool{
 				"UnvotedGovernanceProposal_testval123_1": true,
 			},
-			expectedAlert:    false,
-			expectedResolved: true,
-			description:      "Should resolve alert when proposal is no longer unvoted",
+			expectedAlert:       false,
+			expectedResolved:    true,
+			expectedMsgContains: "no longer awaiting the validator's vote",
+			description:         "Should resolve alerts fired before the ID format carried a deadline, without guessing voted-vs-missed",
 		},
 		{
 			name: "should handle multiple proposals",
-			unvotedProposals: []gov.Proposal{
-				{
-					ProposalId:    1,
-					VotingEndTime: time.Now().Add(24 * time.Hour),
-				},
-				{
-					ProposalId:    2,
-					VotingEndTime: time.Now().Add(48 * time.Hour),
-				},
+			unvotedProposals: []govProposal{
+				{Proposal: gov.Proposal{ProposalId: 1, VotingEndTime: deadline1}},
+				{Proposal: gov.Proposal{ProposalId: 2, VotingEndTime: deadline2}},
 			},
 			existingAlerts:   map[string]bool{},
 			expectedAlert:    true,
 			expectedResolved: false,
 			description:      "Should handle multiple unvoted proposals",
 		},
+		{
+			name:             "should resolve as voted when deadline has not passed yet",
+			unvotedProposals: []govProposal{},
+			existingAlerts: map[string]bool{
+				fmt.Sprintf("UnvotedGovernanceProposal_testval123_1_%d", futureDeadline.Unix()): true,
+			},
+			expectedAlert:       false,
+			expectedResolved:    true,
+			expectedMsgContains: "vote recorded before",
+			description:         "A proposal that left the unvoted list before its own deadline must have been voted on",
+		},
+		{
+			name:             "should resolve as missed when deadline has already passed",
+			unvotedProposals: []govProposal{},
+			existingAlerts: map[string]bool{
+				fmt.Sprintf("UnvotedGovernanceProposal_testval123_1_%d", pastDeadline.Unix()): true,
+			},
+			expectedAlert:       false,
+			expectedResolved:    true,
+			expectedMsgContains: "[MISSED]",
+			description:         "A proposal whose deadline already passed left the unvoted list because voting closed, not because the validator voted",
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Reset alarms for each test
+			// Reset alarms and drain any leftover messages from previous cases
 			testAlarms.AllAlarms = make(map[string]map[string]alertMsgCache)
+			for len(td.alertChan) > 0 {
+				<-td.alertChan
+			}
 
 			if len(tt.existingAlerts) > 0 {
 				testAlarms.AllAlarms["test-chain"] = make(map[string]alertMsgCache)
@@ -2739,6 +2762,49 @@ func TestEvaluateUnvotedGovernanceProposalAlert(t *testing.T) {
 			if resolved != tt.expectedResolved {
 				t.Errorf("%s: expected resolved %v, got %v", tt.description, tt.expectedResolved, resolved)
 			}
+
+			if tt.expectedMsgContains != "" {
+				select {
+				case msg := <-td.alertChan:
+					if !strings.Contains(msg.message, tt.expectedMsgContains) {
+						t.Errorf("%s: expected message to contain %q, got %q", tt.description, tt.expectedMsgContains, msg.message)
+					}
+				default:
+					t.Errorf("%s: expected a message on td.alertChan", tt.description)
+				}
+			}
 		})
+	}
+}
+
+func TestExtractProposalTitles(t *testing.T) {
+	raw, err := proto.Marshal(&v1QueryProposalsResponseTitles{
+		Proposals: []*v1ProposalTitleFields{
+			{ProposalId: 7, Title: "Add a new IBC client", Summary: "Adds support for a new light client type."},
+			{ProposalId: 9, Title: "", Summary: ""}, // no title/summary on the wire - should not appear in the result
+		},
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal test fixture: %v", err)
+	}
+
+	titles := extractProposalTitles(raw)
+
+	got, ok := titles[7]
+	if !ok {
+		t.Fatal("expected proposal 7 to have extracted title/summary")
+	}
+	if got.Title != "Add a new IBC client" || got.Summary != "Adds support for a new light client type." {
+		t.Errorf("unexpected extracted fields for proposal 7: %+v", got)
+	}
+	if _, ok := titles[9]; ok {
+		t.Error("expected proposal 9 (no title/summary) to be absent from the result")
+	}
+
+	if empty := extractProposalTitles(nil); len(empty) != 0 {
+		t.Errorf("expected extractProposalTitles(nil) to return an empty map, got %v", empty)
+	}
+	if garbage := extractProposalTitles([]byte{0xff, 0xff, 0xff}); len(garbage) != 0 {
+		t.Errorf("expected extractProposalTitles to degrade gracefully on undecodable input, got %v", garbage)
 	}
 }

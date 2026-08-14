@@ -20,7 +20,6 @@ import (
 	github_com_cosmos_cosmos_sdk_types "github.com/cosmos/cosmos-sdk/types"
 	"github.com/cosmos/cosmos-sdk/types/bech32"
 	bank "github.com/cosmos/cosmos-sdk/x/bank/types"
-	gov "github.com/cosmos/cosmos-sdk/x/gov/types"
 	slashing "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	staking "github.com/cosmos/cosmos-sdk/x/staking/types"
 	namada "github.com/firstset/tenderduty/v2/td2/namada"
@@ -32,7 +31,7 @@ type NamadaProvider struct {
 	ChainConfig *ChainConfig
 }
 
-func getVotingPeriodProposals(httpClient *http.Client, indexers []string) ([]gov.Proposal, error) {
+func getVotingPeriodProposals(httpClient *http.Client, indexers []string) ([]govProposal, error) {
 	// Store the last error to return if all indexer endpoints fail
 	var lastErr error
 
@@ -42,7 +41,7 @@ func getVotingPeriodProposals(httpClient *http.Client, indexers []string) ([]gov
 
 	// Slice to store proposal IDs
 	votingPeriodProposalIds := []string{}
-	votingPeriodProposals := []gov.Proposal{}
+	votingPeriodProposals := []govProposal{}
 
 	// Try each indexer in the list
 	for _, indexer := range indexers {
@@ -72,14 +71,17 @@ func getVotingPeriodProposals(httpClient *http.Client, indexers []string) ([]gov
 
 			// Process each proposal
 			for _, namadaProposal := range respJson.Results {
-				govProposal, err := namadaProposal.ToGovProposal()
+				converted, err := namadaProposal.ToGovProposal()
 				if err != nil {
 					// Log error but continue with other proposals
 					l(slog.LevelWarn, fmt.Sprintf("Failed to convert proposal %s: %v", namadaProposal.ID, err))
 					continue
 				}
 				if !slices.Contains(votingPeriodProposalIds, namadaProposal.ID) {
-					votingPeriodProposals = append(votingPeriodProposals, *govProposal)
+					votingPeriodProposals = append(votingPeriodProposals, govProposal{
+						Proposal: *converted,
+						Title:    namadaProposal.Content,
+					})
 					votingPeriodProposalIds = append(votingPeriodProposalIds, namadaProposal.ID)
 				}
 			}
@@ -94,8 +96,8 @@ func getVotingPeriodProposals(httpClient *http.Client, indexers []string) ([]gov
 	return votingPeriodProposals, lastErr
 }
 
-func (d *NamadaProvider) QueryUnvotedOpenProposals(ctx context.Context) ([]gov.Proposal, error) {
-	var unVotedProposals []gov.Proposal
+func (d *NamadaProvider) QueryUnvotedOpenProposals(ctx context.Context) ([]govProposal, error) {
+	var unVotedProposals []govProposal
 
 	indexers, ok1 := d.ChainConfig.Provider.Configs["indexers"].([]any)
 	validatorAddress, ok2 := d.ChainConfig.Provider.Configs["validator_address"].(string)

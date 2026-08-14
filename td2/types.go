@@ -22,7 +22,6 @@ import (
 
 	github_com_cosmos_cosmos_sdk_types "github.com/cosmos/cosmos-sdk/types"
 	bank "github.com/cosmos/cosmos-sdk/x/bank/types"
-	gov "github.com/cosmos/cosmos-sdk/x/gov/types"
 	slashing "github.com/cosmos/cosmos-sdk/x/slashing/types"
 	staking "github.com/cosmos/cosmos-sdk/x/staking/types"
 	dash "github.com/firstset/tenderduty/v2/td2/dashboard"
@@ -219,7 +218,7 @@ type ChainConfig struct {
 	lastBlockAlarm          bool
 	lastBlockNum            int64
 	activeAlerts            int
-	unvotedOpenGovProposals []gov.Proposal // the open proposals that the validator has not voted on
+	unvotedOpenGovProposals []govProposal // the open proposals that the validator has not voted on
 
 	// silencedUntil is unix seconds; alert dispatch is suppressed for this chain while
 	// now < silencedUntil and silencedUntil > 0. Set via silenceChain/unsilenceChain
@@ -901,7 +900,7 @@ func clearStale(alarms map[string]alertMsgCache, what string, hasPagerduty bool,
 }
 
 type ChainProvider interface {
-	QueryUnvotedOpenProposals(ctx context.Context) ([]gov.Proposal, error)
+	QueryUnvotedOpenProposals(ctx context.Context) ([]govProposal, error)
 	QueryChainInfo(ctx context.Context) (totalSupply float64, communityTax float64, inflationRate float64, err error)
 	QueryValidatorInfo(ctx context.Context) (pub []byte, moniker string, jailed bool, bonded bool, delegatedTokens float64, commissionRate float64, err error)
 	QuerySigningInfo(ctx context.Context) (*slashing.ValidatorSigningInfo, error)
