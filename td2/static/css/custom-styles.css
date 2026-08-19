@@ -277,7 +277,11 @@ a {
 
 #canvasDiv {
   flex-shrink: 0;
-  overflow: visible;
+  /* Inherit .panel's overflow: hidden so the legend strip's edge-to-edge border/
+     background actually gets clipped to the card's rounded corners (see .panel's
+     comment) instead of squaring past them. This used to be overridden to let
+     block tooltips overflow, but that tooltip feature was removed from
+     grid-renderer.js. */
   flex: initial !important;
 }
 
