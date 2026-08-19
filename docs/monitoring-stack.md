@@ -55,6 +55,11 @@ scrape_configs:
     relabel_configs:
       - target_label: instance
         replacement: your-server-name
+      # Stable label the "node_exporter down" alert rule (step 7) matches on,
+      # independent of job_name - see the gotcha in step 3 about why job_name
+      # itself isn't safe to alert on.
+      - target_label: exporter
+        replacement: node_exporter
 EOF
 sudo chown prometheus:prometheus /etc/prometheus/prometheus.yml
 ```
@@ -172,14 +177,22 @@ you which machine an alert is actually about:
     relabel_configs:
       - target_label: instance
         replacement: <a-real-distinguishing-name>
+      # Same stable label as the first server's job (step 2) - keep this on every
+      # node_exporter job you ever add, regardless of what you name job_name.
+      - target_label: exporter
+        replacement: node_exporter
 ```
 ```bash
 sudo systemctl restart prometheus
 ```
 
-Nothing else to do — the Node Exporter Full dashboard's `instance`/`nodename` pickers and
-all five Telegram alert rules from step 7 already apply to *any* matching instance (none
-of them filter by instance), so the new server is automatically covered.
+Nothing else to do — the Node Exporter Full dashboard's `instance`/`nodename` pickers
+already apply to *any* matching instance (it doesn't filter by instance), so the new
+server is automatically covered there. The Disk/Memory/Load Telegram alert rules from
+step 7 are the same, since they query raw metric names with no job filter at all - but
+**"node_exporter down" specifically matches on the `exporter` label above, not
+`job_name`** (see the gotcha right below for why), so as long as this server's job block
+carries that label too, it's covered automatically.
 
 **Gotcha, if you rename a `job_name` later:** Prometheus doesn't retroactively rename old
 data — samples already stored under the old name stay queryable (within your retention
@@ -188,6 +201,20 @@ the selected time range, so a renamed job keeps showing up as a stale, no-longer
 "ghost" option for a while. Harmless, not a bug — it drops out on its own once those old
 samples age out of whatever time range the dashboard is showing (or past
 `storage.tsdb.retention.time` entirely).
+
+**Bigger gotcha — an alert rule that queries by `job=` breaks silently on a rename.**
+Unlike the dropdown case above, this one isn't harmless: `up{job="node_exporter"}` (an
+early draft of the "node_exporter down" rule below) stops matching *anything* the moment
+you rename a `job_name`, and Prometheus/Grafana don't error on that — the query just
+returns zero series forever. Grafana then evaluates the rule as **NoData** and keeps
+re-notifying on its normal repeat interval (every few hours), showing up in Telegram as a
+`DatasourceNoData` alert with blank labels and `Value: 0.00` that never resolves on its
+own. This is exactly why the job blocks above carry the separate `exporter: node_exporter`
+label and the alert rule matches on *that* instead of `job` - rename `job_name` as many
+times as you want afterward, `exporter` never changes. If you already have a
+`node_exporter down` rule written against `job="node_exporter"` and it's firing NoData:
+add the `exporter` relabel to every existing node_exporter job block, restart Prometheus,
+then update the rule's query to match step 7 below.
 
 ## 4. Install Grafana
 
@@ -316,8 +343,12 @@ created above.
 #### node_exporter down
 - Query:
   ```
-  up{job="node_exporter"}
+  up{exporter="node_exporter"}
   ```
+  Matches on the stable `exporter` label from steps 2/3, not `job` - a plain
+  `job="node_exporter"` query breaks the moment any node_exporter job gets renamed (see
+  the "bigger gotcha" in step 3) and silently turns into a permanently-firing NoData
+  alert instead of an error.
 - Condition: `IS BELOW 1`
 - Evaluation group: `infra-alerts-fast` — Pending period: `1m`
 - Caveat: this catches node_exporter crashing or a network blip to it — it does **not**
