@@ -2,15 +2,10 @@ package tenderduty
 
 import (
 	"context"
-	"crypto/tls"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
-	"net/url"
 	"strings"
-	"time"
 
 	"github.com/cosmos/cosmos-sdk/crypto/keys/ed25519"
 	"github.com/cosmos/cosmos-sdk/crypto/keys/secp256k1"
@@ -52,80 +47,47 @@ type DefaultProvider struct {
 	ChainConfig *ChainConfig
 }
 
+// CheckIfValidatorVoted queries the gov module directly for the validator's vote on a
+// proposal, rather than searching tx history: tx_search depends on the queried node's tx
+// indexer, which isn't guaranteed to still hold an old vote tx (or to be enabled at all),
+// so that approach could flap between "voted" and "not voted" across polls even though the
+// vote was cast and recorded on chain long ago. The gov Vote query has no such dependency -
+// it reads current chain state - so its answer is stable poll to poll.
 func (d *DefaultProvider) CheckIfValidatorVoted(ctx context.Context, proposalID uint64, accAddress string) (bool, error) {
-	params := url.Values{}
-	query := fmt.Sprintf("\"proposal_vote.proposal_id='%d' AND proposal_vote.voter='%s'\"", proposalID, accAddress)
-	params.Add("query", query)
-	params.Add("prove", "false")
-	params.Add("page", "1")
-	params.Add("per_page", "1")
-
-	// Create a reusable HTTP client with timeout
-	tr := &http.Transport{
-		//#nosec G402 -- configurable option
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: td.TLSSkipVerify},
-	}
-	client := &http.Client{
-		Transport: tr,
-		Timeout:   5 * time.Second, // Add reasonable timeout
+	q := gov.QueryVoteRequest{ProposalId: proposalID, Voter: accAddress}
+	b, err := q.Marshal()
+	if err != nil {
+		return false, err
 	}
 
-	// Store the last error to return if all nodes fail
-	var lastErr error
+	resp, err := d.ChainConfig.client.ABCIQuery(ctx, "/cosmos.gov.v1.Query/Vote", b)
+	if err != nil {
+		return false, fmt.Errorf("🛑 failed to query vote for proposal %d on %s, error: %w", proposalID, d.ChainConfig.name, err)
+	}
+	if resp == nil || resp.Response.Value == nil {
+		// The gov module returns an error response with no value when the voter has not
+		// voted on this proposal - that's a normal, expected outcome, not a query failure.
+		return false, nil
+	}
 
-	// Try each node in the list until we find a vote or exhaust all options
-	for _, node := range d.ChainConfig.Nodes {
-		reqURL := fmt.Sprintf("%s/tx_search?%s", node.Url, params.Encode())
+	vote := &gov.QueryVoteResponse{}
+	if err = vote.Unmarshal(resp.Response.Value); err != nil {
+		return false, fmt.Errorf("🛑 failed to unmarshal vote response for proposal %d on %s, error: %w", proposalID, d.ChainConfig.name, err)
+	}
 
-		// Make the HTTP request with context
-		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
-		if err != nil {
-			lastErr = err
-			continue // Try next node
+	return true, nil
+}
+
+// wasPreviouslyUnvoted reports whether proposalID was in the unvoted set as of the last
+// successful poll, so a transient vote-check error can preserve that state instead of
+// guessing.
+func (d *DefaultProvider) wasPreviouslyUnvoted(proposalID uint64) bool {
+	for _, p := range d.ChainConfig.unvotedOpenGovProposals {
+		if p.ProposalId == proposalID {
+			return true
 		}
-
-		resp, err := client.Do(req) //#nosec G704 -- URL is from operator-supplied config
-		if err != nil {
-			lastErr = err
-			continue // Try next node
-		}
-
-		// Use defer in a function to ensure it's called before continuing the loop
-		found := false
-		func() {
-			defer resp.Body.Close()
-
-			// check for existence of txs
-			var result map[string]any
-			if err = json.NewDecoder(resp.Body).Decode(&result); err != nil {
-				lastErr = err
-				return // Exit this func, continue loop
-			}
-
-			// Navigate the JSON structure to check if txs exist
-			if resultObj, ok := result["result"].(map[string]any); ok {
-				if txs, ok := resultObj["txs"].([]any); ok && len(txs) > 0 {
-					// Set found to true so we return true outside the loop
-					found = true
-				}
-			}
-		}()
-
-		// If we found a vote with this node, return immediately
-		if found {
-			return true, nil
-		}
-
-		// Otherwise, continue to next node
 	}
-
-	// If we've tried all nodes and found no votes, return false
-	// If there were errors, return the last one
-	if lastErr != nil {
-		return false, fmt.Errorf("did not find validator vote transaction across all nodes, last error in a response: %w", lastErr)
-	}
-
-	return false, nil
+	return false
 }
 
 func (d *DefaultProvider) QueryUnvotedOpenProposals(ctx context.Context) ([]govProposal, error) {
@@ -163,6 +125,12 @@ func (d *DefaultProvider) QueryUnvotedOpenProposals(ctx context.Context) ([]govP
 					hasVoted, err := d.CheckIfValidatorVoted(ctx, proposal.ProposalId, accAddress)
 					if err != nil {
 						l(slog.LevelWarn, fmt.Sprintf("⚠️ Error checking if validator voted: %v", err))
+						// The vote status is unknown for this poll - fall back to what we
+						// last knew instead of defaulting to "not voted". Otherwise a
+						// transient RPC hiccup fires a false alert, which then immediately
+						// "resolves" once the next poll succeeds, spamming notifications
+						// for a proposal that was actually voted on long ago.
+						hasVoted = !d.wasPreviouslyUnvoted(proposal.ProposalId)
 					}
 
 					if !hasVoted {
