@@ -70,11 +70,12 @@ func (d *DefaultProvider) CheckIfValidatorVoted(ctx context.Context, proposalID 
 		return false, nil
 	}
 
-	vote := &gov.QueryVoteResponse{}
-	if err = vote.Unmarshal(resp.Response.Value); err != nil {
-		return false, fmt.Errorf("🛑 failed to unmarshal vote response for proposal %d on %s, error: %w", proposalID, d.ChainConfig.name, err)
-	}
-
+	// We only care whether a vote record exists, not its contents, so we deliberately
+	// don't unmarshal the response into gov.QueryVoteResponse: on gov-v1 chains the vote's
+	// weight comes back as a plain decimal string (e.g. "1.000000000000000000"), which the
+	// pinned v0.45 gov.WeightedVoteOption's customtype Dec can't parse (it expects the raw
+	// scaled-integer text from Dec.Marshal, not a human-readable decimal) - the same
+	// v1-vs-v1beta1 wire mismatch extractProposalTitles works around for proposal titles.
 	return true, nil
 }
 
